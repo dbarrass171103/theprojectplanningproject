@@ -3,6 +3,7 @@ import {useDroppable} from "@dnd-kit/core";
 import {Column} from "../../types/kanban.ts";
 import {useKanbanStore} from "../../store/kanbanStore.ts";
 import KanbanCard from "./kanbanCard.tsx";
+import AddCardForm from '/AddCardForm';
 
 interface KanbanColumnProps {
     column: Column
@@ -44,6 +45,8 @@ export default function KanbanColumn({column}: KanbanColumnProps) {
                     ))}
                 </SortableContext>
             </div>
+
+            <AddCardForm columnId={column.id}/>
 
         </div>
     )
