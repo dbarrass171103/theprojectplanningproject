@@ -1,5 +1,5 @@
 ﻿import {useState} from "react";
-import {useKanbanStore} from "../../store/kanbanStore.ts";
+import {useKanbanStore} from "../../store/kanbanStore";
 
 interface AddCardFormProps {
     columnId: string

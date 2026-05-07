@@ -1,19 +1,17 @@
 ﻿import {SortableContext, verticalListSortingStrategy} from "@dnd-kit/sortable";
 import {useDroppable} from "@dnd-kit/core";
-import {Column} from "../../types/kanban.ts";
-import {useKanbanStore} from "../../store/kanbanStore.ts";
-import KanbanCard from "./kanbanCard.tsx";
-import AddCardForm from '/AddCardForm';
+import type {Column} from "../../types/kanban";
+import {useKanbanStore} from "../../store/kanbanStore";
+import KanbanCard from "./kanbanCard";
+import AddCardForm from "./AddCardForm";
 
 interface KanbanColumnProps {
     column: Column
 }
 
 export default function KanbanColumn({column}: KanbanColumnProps) {
-    const {cards, deleteColumn} = useKanbanStore(state => ({
-        cards: state.board.cards,
-        deleteColumn: state.deleteColumn
-    }))
+    const cards = useKanbanStore(state => state.board.cards)
+    const deleteColumn = useKanbanStore(state => state.deleteColumn)
 
     const {setNodeRef} = useDroppable({id: column.id})
 

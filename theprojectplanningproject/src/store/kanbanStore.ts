@@ -1,11 +1,11 @@
 ﻿import {create} from 'zustand'
-import type {Board, Card, Column} from "../types/kanban.ts";
+import type {Board, Card, Column} from "../types/kanban";
 
 interface KanbanStore {
     board: Board
     addColumn: (title: string) => void
     deleteColumn: (columnId: string) => void
-    addCard: (columnId: string, title: string, description: string) => void
+    addCard: (columnId: string, title: string, description?: string) => void
     deleteCard: (columnId: string, cardId: string) => void
     moveCard: (fromColumnId: string, toColumnId: string, cardId: string, toIndex: number) => void
     updateCard: (cardId: string, updates: Partial<Card>) => void
@@ -37,8 +37,10 @@ function generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+const initialBoard = loadBoard()
+
 export const useKanbanStore = create<KanbanStore>((set) => ({
-        board: loadBoard(),
+        board: initialBoard,
 
         addColumn: title => set((state) => {
             const newColumn: Column = {id: generateId(), title, cardIds: []}

@@ -1,9 +1,7 @@
+import KanbanPage from './pages/KanbanPage'
+
 function App() {
-    return (
-        <div>
-            <h1>The project planning project</h1>
-        </div>
-    )
+  return <KanbanPage />
 }
 
 export default App

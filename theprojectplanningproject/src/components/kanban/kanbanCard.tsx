@@ -1,7 +1,7 @@
 ﻿import {useSortable} from "@dnd-kit/sortable";
 import {CSS} from "@dnd-kit/utilities";
-import {Card} from "../../types/kanban.ts";
-import {useKanbanStore} from "../../store/kanbanStore.ts";
+import type {Card} from "../../types/kanban";
+import {useKanbanStore} from "../../store/kanbanStore";
 
 interface KanbanCardProps {
     card: Card
@@ -16,11 +16,11 @@ export default function KanbanCard({card, columnId}: KanbanCardProps) {
         listeners,
         setNodeRef,
         transform,
-        transtion,
+        transition,
         isDragging
     } = useSortable({id: card.id})
 
-    const style = {transform: CSS.Transform.toString(transform), transtion}
+    const style = {transform: CSS.Transform.toString(transform), transition}
 
     return (
         <div ref={setNodeRef}
