@@ -1,0 +1,50 @@
+﻿import {SortableContext, verticalListSortingStrategy} from "@dnd-kit/sortable";
+import {useDroppable} from "@dnd-kit/core";
+import {Column} from "../../types/kanban.ts";
+import {useKanbanStore} from "../../store/kanbanStore.ts";
+import KanbanCard from "./kanbanCard.tsx";
+
+interface KanbanColumnProps {
+    column: Column
+}
+
+export default function KanbanColumn({column}: KanbanColumnProps) {
+    const {cards, deleteColumn} = useKanbanStore(state => ({
+        cards: state.board.cards,
+        deleteColumn: state.deleteColumn
+    }))
+
+    const {setNodeRef} = useDroppable({id: column.id})
+
+    const columnCards = column.cardIds.map(id => cards[id]).filter(Boolean)
+
+    return (
+        <div className="bg-gray-100 rounded-xl p-3 w-72 shrink-0 flex flex-col gap-3">
+
+            <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                    <h2 className="font-semibold text-gray-700 text-sm">{column.title}</h2>
+                    <span className="text-xs text-gray-400 bg-gray-200 rounded-full px-2 py-0.5">
+                        {columnCards.length}
+                    </span>
+                </div>
+                <button onClick={() => deleteColumn(column.id)}
+                        className="text-gray-300 hover:text-red-400 transition-colors text-lg leading-none">
+                    ×
+                </button>
+            </div>
+
+            <div ref={setNodeRef} className="flex flex-col gap-2 min-h-20">
+                <SortableContext
+                    items={column.cardIds}
+                    strategy={verticalListSortingStrategy}
+                >
+                    {columnCards.map(card => (
+                        <KanbanCard key={card.id} card={card} columnId={column.id}/>
+                    ))}
+                </SortableContext>
+            </div>
+
+        </div>
+    )
+}

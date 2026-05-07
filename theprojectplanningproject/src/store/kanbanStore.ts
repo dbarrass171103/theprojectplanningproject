@@ -74,42 +74,42 @@ export const useKanbanStore = create<KanbanStore>((set) => ({
 
         deleteCard: (columnId, cardId) => set((state) => {
             const columns = state.board.columns.map(col =>
-            col.id === columnId ? { ...col, cardIds: col.cardIds.filter(id => id !== cardId) } : col)
+                col.id === columnId ? {...col, cardIds: col.cardIds.filter(id => id !== cardId)} : col)
 
-            const cards  = { ...state.board.cards }
+            const cards = {...state.board.cards}
             delete cards[cardId]
             const board = {columns, cards}
             saveBoard(board)
-            return { board}
+            return {board}
         }),
 
         moveCard: (fromColumnId, toColumnId, cardId, toIndex) => set((state) => {
             const columns = state.board.columns.map(col => {
                 if (col.id === fromColumnId && col.id !== toColumnId) {
-                    return { ...col, cardIds: col.cardIds.filter(id => id !== cardId) }
+                    return {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
                 }
                 if (col.id === toColumnId) {
-                    const ids = col.id ===fromColumnId ? col.cardIds.filter(id => id !== cardId) : [...col.cardIds]
+                    const ids = col.id === fromColumnId ? col.cardIds.filter(id => id !== cardId) : [...col.cardIds]
                     ids.splice(toIndex, 0, cardId)
-                    return { ...col, cardIds: ids }
+                    return {...col, cardIds: ids}
                 }
                 return col
             })
-            const board = { ...state.board, columns }
+            const board = {...state.board, columns}
             saveBoard(board)
-            return { board}
+            return {board}
         }),
 
         updateCard: (cardId, updates) => set((state) => {
             const board = {
                 ...state.board,
-                cards : {
+                cards: {
                     ...state.board.cards,
-                    [cardId]: { ...state.board.cards[cardId], ...updates}
+                    [cardId]: {...state.board.cards[cardId], ...updates}
                 }
             }
             saveBoard(board)
-            return { board}
+            return {board}
         })
     })
 )
