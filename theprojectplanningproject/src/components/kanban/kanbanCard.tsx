@@ -35,7 +35,7 @@ export default function KanbanCard({card, columnId}: KanbanCardProps) {
           `}
         >
             <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-gray-800 leading-snug">
+                <p className="text-sm font-medium text-gray-800 leading-snug break-all">
                     {card.title}
                 </p>
                 <button onClick={() => deleteCard(columnId, card.id)}
@@ -45,7 +45,7 @@ export default function KanbanCard({card, columnId}: KanbanCardProps) {
             </div>
 
             {card.description && (
-                <p className="text-xs text-gray-400 mt-1 leading-snug">
+                <p className="text-xs text-gray-400 mt-1 leading-snug break-all">
                     {card.description}
                 </p>
             )}

@@ -22,7 +22,7 @@ export default function KanbanColumn({column}: KanbanColumnProps) {
 
             <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                    <h2 className="font-semibold text-gray-700 text-sm">{column.title}</h2>
+                    <h2 className="font-semibold text-gray-700 text-sm break-all">{column.title}</h2>
                     <span className="text-xs text-gray-400 bg-gray-200 rounded-full px-2 py-0.5">
                         {columnCards.length}
                     </span>
