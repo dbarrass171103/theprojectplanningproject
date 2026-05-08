@@ -30,7 +30,11 @@ function loadBoard(): Board {
 }
 
 function saveBoard(board: Board) {
-    localStorage.setItem('kanban-board', JSON.stringify(board))
+    try {
+        localStorage.setItem('kanban-board', JSON.stringify(board))
+    } catch (e) {
+        console.warn('Failed to save board to localStorage', e)
+    }
 }
 
 function generateId(): string {
@@ -86,13 +90,28 @@ export const useKanbanStore = create<KanbanStore>((set) => ({
         }),
 
         moveCard: (fromColumnId, toColumnId, cardId, toIndex) => set((state) => {
+            const fromColumn = state.board.columns.find(c => c.id === fromColumnId)
+            const toColumn = state.board.columns.find(c => c.id === toColumnId)
+            if (!fromColumn || !toColumn) return state
+
+            const fromIndex = fromColumn.cardIds.indexOf(cardId)
+            if (fromIndex === -1) return state
+
+            let normalisedIndex = toIndex
+            if (fromColumnId === toColumnId && toIndex > fromIndex) {
+                normalisedIndex = toIndex - 1
+            }
+
             const columns = state.board.columns.map(col => {
                 if (col.id === fromColumnId && col.id !== toColumnId) {
                     return {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
                 }
                 if (col.id === toColumnId) {
-                    const ids = col.id === fromColumnId ? col.cardIds.filter(id => id !== cardId) : [...col.cardIds]
-                    ids.splice(toIndex, 0, cardId)
+                    const ids = col.id === fromColumnId
+                        ? col.cardIds.filter(id => id !== cardId)
+                        : [...col.cardIds]
+                    const clamped = Math.max(0, Math.min(normalisedIndex, ids.length))
+                    ids.splice(clamped, 0, cardId)
                     return {...col, cardIds: ids}
                 }
                 return col

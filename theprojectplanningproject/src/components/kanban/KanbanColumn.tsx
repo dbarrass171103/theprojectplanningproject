@@ -2,7 +2,7 @@
 import {useDroppable} from "@dnd-kit/core";
 import type {Column} from "../../types/kanban";
 import {useKanbanStore} from "../../store/kanbanStore";
-import KanbanCard from "./kanbanCard";
+import KanbanCard from "./KanbanCard";
 import AddCardForm from "./AddCardForm";
 
 interface KanbanColumnProps {
@@ -22,13 +22,14 @@ export default function KanbanColumn({column}: KanbanColumnProps) {
 
             <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                    <h2 className="font-semibold text-gray-700 text-sm break-all">{column.title}</h2>
+                    <h2 className="font-semibold text-gray-700 text-sm break-words">{column.title}</h2>
                     <span className="text-xs text-gray-400 bg-gray-200 rounded-full px-2 py-0.5">
                         {columnCards.length}
                     </span>
                 </div>
                 <button onClick={() => deleteColumn(column.id)}
-                        className="text-gray-300 hover:text-red-400 transition-colors text-lg leading-none">
+                        className="text-gray-300 hover:text-red-400 transition-colors text-lg leading-none"
+                        aria-label="Delete column">
                     ×
                 </button>
             </div>

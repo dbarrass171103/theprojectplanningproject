@@ -20,8 +20,19 @@ export default function AddCardForm({columnId}: AddCardFormProps) {
         setIsOpen(false)
     }
 
-    function handleKeyDown(e: React.KeyboardEvent) {
-        if (e.key === 'Enter') handleSubmit()
+    function handleTitleKeyDown(e: React.KeyboardEvent) {
+        if (e.key === 'Enter') {
+            e.preventDefault()
+            handleSubmit()
+        }
+        if (e.key === 'Escape') setIsOpen(false)
+    }
+
+    function handleDescriptionKeyDown(e: React.KeyboardEvent) {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            handleSubmit()
+        }
         if (e.key === 'Escape') setIsOpen(false)
     }
 
@@ -42,14 +53,14 @@ export default function AddCardForm({columnId}: AddCardFormProps) {
                 placeholder="Card title"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
-                onKeyDown={handleKeyDown}
+                onKeyDown={handleTitleKeyDown}
                 className="text-sm rounded-lg border border-gray-300 px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
             <textarea
                 placeholder="Description (optional)"
                 value={description}
                 onChange={e => setDescription(e.target.value)}
-                onKeyDown={handleKeyDown}
+                onKeyDown={handleDescriptionKeyDown}
                 rows={2}
                 className="text-sm rounded-lg border border-gray-300 px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
             />
