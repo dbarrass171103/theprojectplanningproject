@@ -114,6 +114,21 @@
     margin: 2em 0;
 }
 
+.prose-editor a,
+.prose-editor .editor-link {
+    color: #2563eb; /* blue-600 */
+    text-decoration: underline;
+    text-decoration-color: #93c5fd; /* blue-300 */
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.prose-editor a:hover,
+.prose-editor .editor-link:hover {
+    color: #1d4ed8; /* blue-700 */
+    text-decoration-color: #2563eb;
+}
+
 .prose-editor p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
     color: #9ca3af; /* gray-400 */
