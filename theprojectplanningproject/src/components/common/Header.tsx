@@ -8,11 +8,8 @@ interface NavItem {
 // list of navigation items.
 const NAV_ITEMS: NavItem[] = [
     {to: '/', label: 'Board'},
-    {to: '/gantt', label: 'Gantt'},
-    {to: '/tasks', label: 'Tasks'},
-    {to: '/calendar', label: 'Calendar'},
     {to: '/notes', label: 'Notes'},
-    {to: '/settings', label: 'Settings'},
+
 ]
 
 export default function Header() {

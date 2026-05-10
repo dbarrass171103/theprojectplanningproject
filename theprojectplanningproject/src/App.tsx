@@ -21,11 +21,8 @@ function App() {
             <Routes>
                 <Route element={<Layout/>}>
                     <Route path="/" element={<KanbanPage/>}/>
-                    <Route path="/gantt" element={<NotesPage/>}/>
-                    <Route path="/tasks" element={<NotesPage/>}/>
-                    <Route path="/calendar" element={<NotesPage/>}/>
                     <Route path="/notes" element={<NotesPage/>}/>
-                    <Route path="/settings" element={<NotesPage/>}/>
+
                 </Route>
             </Routes>
         </BrowserRouter>
