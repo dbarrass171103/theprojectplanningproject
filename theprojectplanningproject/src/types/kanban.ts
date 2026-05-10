@@ -1,7 +1,7 @@
 ﻿export interface Card {
     id: string
     title: string
-    description?: string
+    description?: unknown
     createdAt: number
 }
 export interface Column {

@@ -1,10 +1,11 @@
-﻿import {NavLink} from 'react-router-dom'
+﻿import { NavLink } from 'react-router-dom'
 
 interface NavItem {
     to: string
     label: string
 }
 
+// list of navigation items.
 const NAV_ITEMS: NavItem[] = [
     {to: '/', label: 'Board'},
     {to: '/gantt', label: 'Gantt'},
@@ -20,21 +21,27 @@ export default function Header() {
             <h1 className="text-base font-semibold text-gray-800 shrink-0">
                 The Project Planning Project
             </h1>
-
             <nav className="flex items-center gap-1 overflow-x-auto">
+
+                {/* Loops through each nav item and render a NavLink */}
                 {NAV_ITEMS.map(item => (
                     <NavLink
                         key={item.to}
-                        to={item.to}
+                        to={item.to}  // Destination
                         end={item.to === '/'}
+
                         className={({isActive}) => `
                             text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap
-                            ${isActive
-                            ? 'bg-blue-50 text-blue-600 font-medium'
-                            : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'
-                        }
+                            ${
+                                isActive
+                                // Active link style
+                                ? 'bg-blue-50 text-blue-600 font-medium'
+                                // Inactive link style and hover effects
+                                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'
+                            }
                         `}
                     >
+                        {/* The text for the nav item */}
                         {item.label}
                     </NavLink>
                 ))}

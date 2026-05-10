@@ -1,4 +1,6 @@
 ﻿import {useEditorState, type Editor} from '@tiptap/react'
+import ColorPickerButton from './ColorPickerButton'
+import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from './ColorSwatches'
 
 interface ToolbarButtonProps {
     onClick: () => void
@@ -10,21 +12,26 @@ interface ToolbarButtonProps {
 }
 
 function ToolbarButton({onClick, isActive, disabled, label, shortcut, children}: ToolbarButtonProps) {
+    // Tooltip text includes shortcut if provided.
     const title = shortcut ? `${label} (${shortcut})` : label
+
     return (
         <button
             type="button"
+            // Prevent the editor from losing focus otherwise formatting would apply to nothing.
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onClick}
             disabled={disabled}
             aria-label={label}
             aria-pressed={isActive}
             title={title}
             className={`
-                px-2 py-1 text-sm rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed
+                px-2 py-1 text-sm rounded transition-colors
+                disabled:opacity-30 disabled:cursor-not-allowed
                 ${isActive
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
-                }
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+            }
             `}
         >
             {children}
@@ -36,11 +43,14 @@ interface EditorToolbarProps {
     editor: Editor | null
 }
 
+const isMac =
+    typeof navigator !== 'undefined' &&
+    /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 const mod = isMac ? '⌘' : 'Ctrl'
 const shift = isMac ? '⇧' : 'Shift'
 
+// The main top toolbar for the editor
 export default function EditorToolbar({editor}: EditorToolbarProps) {
     const state = useEditorState({
         editor,
@@ -50,15 +60,25 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
                 isBold: editor.isActive('bold'),
                 isItalic: editor.isActive('italic'),
                 isStrike: editor.isActive('strike'),
+                isUnderline: editor.isActive('underline'),
                 isCode: editor.isActive('code'),
                 isCodeBlock: editor.isActive('codeBlock'),
                 isBlockquote: editor.isActive('blockquote'),
                 isBulletList: editor.isActive('bulletList'),
                 isOrderedList: editor.isActive('orderedList'),
                 isLink: editor.isActive('link'),
+                isSuperscript: editor.isActive('superscript'),
+                isSubscript: editor.isActive('subscript'),
                 isH1: editor.isActive('heading', {level: 1}),
                 isH2: editor.isActive('heading', {level: 2}),
                 isH3: editor.isActive('heading', {level: 3}),
+                alignLeft: editor.isActive({textAlign: 'left'}),
+                alignCenter: editor.isActive({textAlign: 'center'}),
+                alignRight: editor.isActive({textAlign: 'right'}),
+                currentColor:
+                    (editor.getAttributes('textStyle').color as string | undefined) ?? null,
+                currentHighlight:
+                    (editor.getAttributes('highlight').color as string | undefined) ?? null,
                 canUndo: editor.can().undo(),
                 canRedo: editor.can().redo(),
             }
@@ -67,11 +87,10 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
     if (!editor || !state) return null
 
+    // Handles link editing.
     function handleLinkClick() {
-        if (!editor) return
         const previousUrl = editor.getAttributes('link').href as string | undefined
         const url = window.prompt('Enter URL', previousUrl ?? 'https://')
-
         if (url === null) return
 
         if (url === '') {
@@ -82,14 +101,17 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
         editor.chain().focus().extendMarkRange('link').setLink({href: url}).run()
     }
 
+    // Removes all formatting.
     function handleClearFormatting() {
-        if (!editor) return
-
         editor.chain().focus().unsetAllMarks().clearNodes().run()
     }
 
     return (
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-200 bg-white sticky top-0 z-10 flex-wrap">
+        <div className="
+            flex items-center gap-1 px-3 py-2 border-b border-gray-200
+            bg-white sticky top-0 z-10 flex-wrap
+        ">
+            {/* Bold */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleBold().run()}
                 isActive={state.isBold}
@@ -98,6 +120,8 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 <strong>B</strong>
             </ToolbarButton>
+
+            {/* Italic */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleItalic().run()}
                 isActive={state.isItalic}
@@ -106,6 +130,18 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 <em>I</em>
             </ToolbarButton>
+
+            {/* Underline */}
+            <ToolbarButton
+                onClick={() => editor.chain().focus().toggleUnderline().run()}
+                isActive={state.isUnderline}
+                label="Underline"
+                shortcut={`${mod}+U`}
+            >
+                <u>U</u>
+            </ToolbarButton>
+
+            {/* Strikethrough */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleStrike().run()}
                 isActive={state.isStrike}
@@ -114,6 +150,8 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 <s>S</s>
             </ToolbarButton>
+
+            {/* Link */}
             <ToolbarButton
                 onClick={handleLinkClick}
                 isActive={state.isLink}
@@ -125,6 +163,33 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
+            {/* Text colour */}
+            <ColorPickerButton
+                label="Text colour"
+                icon={<span className="text-sm font-bold">A</span>}
+                swatches={TEXT_COLOR_SWATCHES}
+                currentColor={state.currentColor}
+                onSelect={(color) => editor.chain().focus().setColor(color).run()}
+                onClear={() => editor.chain().focus().unsetColor().run()}
+                isActive={!!state.currentColor}
+            />
+
+            {/* Highlight */}
+            <ColorPickerButton
+                label="Highlight"
+                icon={<span className="text-sm">🖍</span>}
+                swatches={HIGHLIGHT_SWATCHES}
+                currentColor={state.currentHighlight}
+                onSelect={(color) =>
+                    editor.chain().focus().toggleHighlight({color}).run()
+                }
+                onClear={() => editor.chain().focus().unsetHighlight().run()}
+                isActive={!!state.currentHighlight}
+            />
+
+            <div className="w-px h-5 bg-gray-200 mx-1"/>
+
+            {/* Headings */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleHeading({level: 1}).run()}
                 isActive={state.isH1}
@@ -133,6 +198,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 H1
             </ToolbarButton>
+
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleHeading({level: 2}).run()}
                 isActive={state.isH2}
@@ -141,6 +207,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 H2
             </ToolbarButton>
+
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleHeading({level: 3}).run()}
                 isActive={state.isH3}
@@ -152,6 +219,37 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
+            {/* Alignment */}
+            <ToolbarButton
+                onClick={() => editor.chain().focus().setTextAlign('left').run()}
+                isActive={state.alignLeft}
+                label="Align left"
+                shortcut={`${mod}+${shift}+L`}
+            >
+                ⬱
+            </ToolbarButton>
+
+            <ToolbarButton
+                onClick={() => editor.chain().focus().setTextAlign('center').run()}
+                isActive={state.alignCenter}
+                label="Align center"
+                shortcut={`${mod}+${shift}+E`}
+            >
+                ☰
+            </ToolbarButton>
+
+            <ToolbarButton
+                onClick={() => editor.chain().focus().setTextAlign('right').run()}
+                isActive={state.alignRight}
+                label="Align right"
+                shortcut={`${mod}+${shift}+R`}
+            >
+                ⇶
+            </ToolbarButton>
+
+            <div className="w-px h-5 bg-gray-200 mx-1"/>
+
+            {/* Lists */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleBulletList().run()}
                 isActive={state.isBulletList}
@@ -160,6 +258,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 •
             </ToolbarButton>
+
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleOrderedList().run()}
                 isActive={state.isOrderedList}
@@ -171,6 +270,28 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
+            {/* Super/subscript */}
+            <ToolbarButton
+                onClick={() => editor.chain().focus().toggleSuperscript().run()}
+                isActive={state.isSuperscript}
+                label="Superscript"
+                shortcut={`${mod}+.`}
+            >
+                X²
+            </ToolbarButton>
+
+            <ToolbarButton
+                onClick={() => editor.chain().focus().toggleSubscript().run()}
+                isActive={state.isSubscript}
+                label="Subscript"
+                shortcut={`${mod}+,`}
+            >
+                X₂
+            </ToolbarButton>
+
+            <div className="w-px h-5 bg-gray-200 mx-1"/>
+
+            {/* Code formatting */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleCode().run()}
                 isActive={state.isCode}
@@ -179,6 +300,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 {'<>'}
             </ToolbarButton>
+
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleCodeBlock().run()}
                 isActive={state.isCodeBlock}
@@ -187,6 +309,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 {'{ }'}
             </ToolbarButton>
+
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleBlockquote().run()}
                 isActive={state.isBlockquote}
@@ -198,6 +321,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
+            {/* Clear formatting */}
             <ToolbarButton
                 onClick={handleClearFormatting}
                 label="Clear formatting"
@@ -207,6 +331,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
+            {/* Undo / Redo */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().undo().run()}
                 disabled={!state.canUndo}
@@ -215,6 +340,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 ↶
             </ToolbarButton>
+
             <ToolbarButton
                 onClick={() => editor.chain().focus().redo().run()}
                 disabled={!state.canRedo}
