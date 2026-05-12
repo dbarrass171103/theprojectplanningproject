@@ -12,7 +12,7 @@
 // via <Outlet/> so nested routes can replace the main content area freely.
 
 import {BrowserRouter, Routes, Route, Outlet} from 'react-router-dom'
-import Header from '../../../theprojectplanningproject/theprojectplanningproject/src/components/common/Header'
+import Header from "./components/common/Header.tsx";
 import HomePage from './pages/HomePage'
 import KanbanPage from './pages/KanbanPage'
 import NotesPage from './pages/NotesPage'
