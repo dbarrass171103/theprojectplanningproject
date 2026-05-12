@@ -1,4 +1,20 @@
-﻿import {
+﻿// Root component of the kanban view. Renders columns horizontally with the
+// "+ Add column" button on the right.
+//
+// Two responsibilities beyond rendering:
+//
+//   1. Drag-and-drop coordination via @dnd-kit. The board owns the
+//      DndContext; individual columns and cards register as droppable/sortable
+//      via their own hooks. We handle both onDragOver (live preview as you
+//      drag between columns) and onDragEnd (commit the final position).
+//
+//   2. Card flashing. When the user clicks a card-mention chip in a note or
+//      card description, we navigate here with `{state: {flashCardId}}`. The
+//      board picks that up, scrolls the card into view, and applies a
+//      temporary glow class for ~2 seconds. After flashing once we strip
+//      the state from history so a back/forward navigation doesn't re-flash.
+
+import {
     DndContext,
     PointerSensor,
     useSensor,
@@ -12,47 +28,47 @@ import {useKanbanStore} from '../../store/kanbanStore'
 import KanbanColumn from './KanbanColumn'
 import AddColumnButton from './AddColumnButton'
 
-// Handles rendering, drag and drop, highlighting cards when coming from other page.
 export default function KanbanBoard() {
     const columns = useKanbanStore(state => state.board.columns)
-
-    // Action to move a card between columns or within a column.
     const moveCard = useKanbanStore(state => state.moveCard)
-    // Router utilities for reading navigation state and updating the URL.
+
     const location = useLocation()
     const navigate = useNavigate()
-    // Used to temporarily highlight a card.
+    // Cards in this state get the temporary highlight class.
     const [flashedCardId, setFlashedCardId] = useState<string | null>(null)
 
-    // Flash a card
+    // Handle the flash-on-arrival behaviour. Cleared via setTimeout so the
+    // glow fades and doesn't persist if the user navigates away mid-flash.
     useEffect(() => {
         const stateCardId = (location.state as {flashCardId?: string} | null)?.flashCardId
         if (!stateCardId) return
 
-        // Trigger the flash.
         setFlashedCardId(stateCardId)
 
-        // Remove the state from the URL so refreshing doesn't re-flash.
+        // Strip the navigation state immediately so a refresh or back nav
+        // doesn't re-trigger the flash.
         navigate(location.pathname, {replace: true, state: null})
 
-        // Clear the flash after 2 seconds.
         const t = window.setTimeout(() => setFlashedCardId(null), 2000)
         return () => window.clearTimeout(t)
     }, [location.state])
 
-
-    // Configure dragging sensors
+    // 8px activation distance avoids accidental drags when clicking edit/delete
+    // buttons on a card — short clicks won't be interpreted as drags.
     const sensors = useSensors(
         useSensor(PointerSensor, {
             activationConstraint: {distance: 8},
         })
     )
 
+    // Helper used by both drag handlers — locate which column currently owns
+    // a given card by id.
     function findColumnOfCard(cardId: string): string | undefined {
         return columns.find(col => col.cardIds.includes(cardId))?.id
     }
 
-    // Used to move cards between columns, fires constantly
+    // Fires continuously while dragging. Used to preview the drop position
+    // by moving the card live as the cursor crosses columns/cards.
     function handleDragOver(event: DragOverEvent) {
         const {active, over} = event
         if (!over) return
@@ -63,14 +79,15 @@ export default function KanbanBoard() {
         const activeColumnId = findColumnOfCard(activeId)
         if (!activeColumnId) return
 
-        // If `overId` is a column, use that. Otherwise it's a card.
+        // `overId` is either a card id (hovering over another card) or a column
+        // id (hovering over the empty area of a column). Resolve to a column.
         const overColumnId = findColumnOfCard(overId) ?? overId
         if (activeColumnId === overColumnId) return
 
         const overColumn = columns.find(col => col.id === overColumnId)
         if (!overColumn) return
 
-        // Determine where in the target column to insert the card.
+        // If hovering over a specific card, insert before it; otherwise append.
         const overCardIndex = overColumn.cardIds.indexOf(overId)
         const toIndex = overCardIndex !== -1
             ? overCardIndex
@@ -79,7 +96,8 @@ export default function KanbanBoard() {
         moveCard(activeColumnId, overColumnId, activeId, toIndex)
     }
 
-    // Used when the user lets go of the card to confirm its position
+    // Fires once when the user releases. Confirms the final drop position.
+    // Same logic as handleDragOver but also handles within-column reorders.
     function handleDragEnd(event: DragEndEvent) {
         const {active, over} = event
         if (!over) return
@@ -87,7 +105,7 @@ export default function KanbanBoard() {
         const activeId = active.id as string
         const overId = over.id as string
 
-        // If dropped on itself, nothing to do.
+        // No-op when a card is dropped on itself.
         if (activeId === overId) return
 
         const activeColumnId = findColumnOfCard(activeId)
@@ -109,7 +127,10 @@ export default function KanbanBoard() {
     return (
         <DndContext
             sensors={sensors}
-            collisionDetection={closestCorners} // Determines how drop targets are chosen.
+            // closestCorners picks the drop target whose corners are nearest
+            // to the dragged card. Works well for horizontal kanban layouts
+            // where cards stack vertically within columns.
+            collisionDetection={closestCorners}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
         >
@@ -122,7 +143,6 @@ export default function KanbanBoard() {
                     />
                 ))}
 
-                {/* Button to add new columns */}
                 <AddColumnButton/>
             </div>
         </DndContext>

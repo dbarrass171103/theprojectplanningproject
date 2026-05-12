@@ -1,28 +1,30 @@
-﻿import {ReactRenderer} from '@tiptap/react'
+﻿// Suggestion configuration for @note mentions in card description editors.
+//
+// Mirror of cardMentionSuggestion.ts — same popup positioning strategy
+// (floating-ui appended to document.body), same keyboard routing through
+// MentionList's imperative ref. The only differences are the data source
+// (notesStore instead of kanbanStore) and the absence of a sublabel, since
+// notes aren't grouped by column.
+//
+// Items are ordered by recency (the store's `order` array) rather than
+// alphabetically, matching the sidebar ordering the user already sees.
+
+import {ReactRenderer} from '@tiptap/react'
 import {computePosition, flip, shift, offset} from '@floating-ui/dom'
 import type {SuggestionOptions} from '@tiptap/suggestion'
 import {MentionList, type MentionListRef, type MentionItem} from './MentionList'
 import {useNotesStore} from '../store/notesStore'
 
-/**
- * Creates the suggestion configuration for @note mentions.
- * This is passed into the NoteMention extension.
- */
 export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionItem>, 'editor'> {
     return {
         char: '@',
 
-        /**
-         * Build the list of suggestion items based on the user's query.
-         * Pulls from the Notes store:
-         * - note title
-         * - note ID
-         * Ordered by recency (order array).
-         */
         items: ({query}) => {
             const {notes, order} = useNotesStore.getState()
             const lower = query.toLowerCase()
 
+            // Walk the order array (recency-sorted) rather than Object.values
+            // so the list matches the sidebar's ordering.
             return order
                 .map(id => {
                     const note = notes[id]
@@ -32,10 +34,9 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                 })
                 .filter((n): n is MentionItem => n !== null)
                 .filter(n => n.label.toLowerCase().includes(lower))
-                .slice(0, 10) // limit for readability
+                .slice(0, 10)
         },
 
-        // Render logic
         render: () => {
             let component: ReactRenderer<MentionListRef> | null = null
             let floatingEl: HTMLElement | null = null
@@ -46,7 +47,6 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                 }
             }
 
-            // Position relative to cursor
             async function updatePosition(rect: DOMRect | null) {
                 if (!floatingEl || !rect) return
 
@@ -56,9 +56,9 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     {
                         placement: 'bottom-start',
                         middleware: [
-                            offset(4),   // small gap below cursor
-                            flip(),      // flip if near screen edge
-                            shift({padding: 8}), // keep inside viewport
+                            offset(4),
+                            flip(),
+                            shift({padding: 8}),
                         ],
                     }
                 )
@@ -70,7 +70,6 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
             }
 
             return {
-                // Called when user types @
                 onStart: props => {
                     component = new ReactRenderer(MentionList, {
                         props,
@@ -79,7 +78,6 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
 
                     if (!props.clientRect) return
 
-                    // Create floating container
                     floatingEl = document.createElement('div')
                     floatingEl.style.position = 'absolute'
                     floatingEl.style.zIndex = '50'
@@ -89,7 +87,6 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     void updatePosition(props.clientRect())
                 },
 
-                // Called when query or items update
                 onUpdate: props => {
                     component?.updateProps(props)
 
@@ -98,7 +95,6 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     }
                 },
 
-                // Keyboard handling
                 onKeyDown: props => {
                     if (props.event.key === 'Escape') {
                         floatingEl?.remove()
@@ -108,7 +104,6 @@ export function createNoteMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     return component?.ref?.onKeyDown({event: props.event}) ?? false
                 },
 
-                // Cleanup when the suggestion finishes
                 onExit: () => {
                     floatingEl?.remove()
                     floatingEl = null

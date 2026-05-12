@@ -1,32 +1,36 @@
-﻿import {useState} from 'react'
-import {useNotesStore, useSelectedNote} from '../store/notesStore'
-import NotesSidebar from '../components/notes/NotesSidebar'
-import NoteEditor from '../components/notes/NoteEditor'
+﻿// Notes page — a two-panel layout: collapsible sidebar on the left, editor
+// (or empty state) on the right.
+//
+// The sidebar manages selection and creation. The editor is keyed on
+// selectedNote.id so React unmounts and remounts it when the user switches
+// notes, which resets all editor state cleanly without manual teardown.
+//
+// Empty state logic distinguishes between "no notes exist at all" and
+// "notes exist but none is selected" so the copy and CTA stay relevant.
 
-// The main notes page layout.
+import {useState} from 'react'
+import {useNotesStore, useSelectedNote} from '../store/notesStore'
+import NotesSidebar from "../components/notes/NotesSidebar.tsx";
+import NoteEditor from "../components/notes/NoteEditor.tsx";
 export default function NotesPage() {
-    // Whether the sidebar is expanded or collapsed.
     const [sidebarOpen, setSidebarOpen] = useState(true)
-    // The currently selected note (or null).
     const selectedNote = useSelectedNote()
     const createNote = useNotesStore(s => s.createNote)
-    // Whether any notes exist at all.
     const hasAnyNotes = useNotesStore(s => s.order.length > 0)
 
     return (
         <div className="flex h-[calc(100vh-57px)]">
-            {/* Sidebar (collapsible) */}
             <NotesSidebar
                 isOpen={sidebarOpen}
                 onToggle={() => setSidebarOpen(o => !o)}
             />
 
-            {/* Main content area */}
             <div className="flex-1 overflow-hidden bg-white">
-                {selectedNote ? ( // When a note is selected show the editor
+                {selectedNote ? (
+                    // Key on note ID so the editor fully remounts on note change —
+                    // simpler and safer than trying to reset Tiptap/Yjs state in place.
                     <NoteEditor key={selectedNote.id} note={selectedNote}/>
                 ) : (
-                    // Empty state when no note selected
                     <div className="flex flex-col items-center justify-center h-full text-center px-6">
                         <div className="text-5xl mb-4 opacity-40">📝</div>
 

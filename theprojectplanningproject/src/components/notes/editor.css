@@ -236,3 +236,42 @@
 .card-flash {
     animation: card-flash 2s ease-in-out;
 }
+
+/* APPEND THESE RULES TO YOUR EXISTING editor.css FILE.
+   They handle the visual rendering of remote users' cursors and selections. */
+
+/* Each remote user's caret. The colour comes from `user.color` in the
+   awareness state, applied via inline style by the Tiptap extension. */
+.tiptap .collaboration-carets__caret {
+    position: relative;
+    margin-left: -1px;
+    margin-right: -1px;
+    border-left: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+    word-break: normal;
+    pointer-events: none;
+}
+
+/* The little name label that floats above the caret. */
+.tiptap .collaboration-carets__label {
+    position: absolute;
+    top: -1.4em;
+    left: -1px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    user-select: none;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 3px 3px 3px 0;
+    white-space: nowrap;
+    background: currentColor;
+}
+
+/* Highlight for a remote user's text selection. Faint so it doesn't
+   compete with the user's own selection. */
+.tiptap .collaboration-carets__selection {
+    background-color: currentColor;
+    opacity: 0.2;
+    pointer-events: none;
+}

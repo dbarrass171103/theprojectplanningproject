@@ -1,5 +1,5 @@
 ﻿import {useMemo} from 'react'
-import {useNavigate} from 'react-router-dom'
+import {useNavigate, useParams} from 'react-router-dom'
 import {useNotesStore} from '../../store/notesStore'
 
 interface CardDescriptionDisplayProps {
@@ -8,17 +8,15 @@ interface CardDescriptionDisplayProps {
 
 export default function CardDescriptionDisplay({doc}: CardDescriptionDisplayProps) {
     const notes = useNotesStore(s => s.notes)
-
-    // React Router hook for programmatic navigation.
     const navigate = useNavigate()
+    // Read projectId from the URL so we can build the correct notes path.
+    const {projectId} = useParams<{projectId: string}>()
 
-    // Memoize the rendered output, recalculates when the document changes or the notes change.
     const rendered = useMemo(() => {
         if (!doc || typeof doc !== 'object') return null
-        return renderNode(doc as TiptapNode, notes, navigate, 'root')
-    }, [doc, notes, navigate])
+        return renderNode(doc as TiptapNode, notes, navigate, projectId ?? '', 'root')
+    }, [doc, notes, navigate, projectId])
 
-    // If nothing was rendered, don't output an empty wrapper.
     if (!rendered) return null
 
     return (
@@ -28,7 +26,6 @@ export default function CardDescriptionDisplay({doc}: CardDescriptionDisplayProp
     )
 }
 
-// Tiptap node that can represent a number of things
 interface TiptapNode {
     type?: string
     text?: string
@@ -37,15 +34,14 @@ interface TiptapNode {
     marks?: {type: string}[]
 }
 
-// Renders a Tiptap JSON element into React elements.
 function renderNode(
     node: TiptapNode,
     notes: ReturnType<typeof useNotesStore.getState>['notes'],
     navigate: ReturnType<typeof useNavigate>,
+    projectId: string,
     keyPrefix: string,
 ): React.ReactNode {
 
-    // Text node
     if (node.type === 'text') {
         let element: React.ReactNode = node.text
 
@@ -62,29 +58,26 @@ function renderNode(
         return element
     }
 
-    // Note mention node (@note)
     if (node.type === 'noteMention') {
         const id = node.attrs?.id as string | undefined
         const fallbackLabel = (node.attrs?.label as string | undefined) ?? 'note'
 
-        // Look up the note in Zustand store.
         const liveNote = id ? notes[id] : undefined
         const isStale = !liveNote
 
-        // Use the note title if available.
         const label = liveNote?.title || fallbackLabel || 'Untitled'
 
         return (
             <button
                 type="button"
-                // Prevents dragging the card or triggering parent events.
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                     e.stopPropagation()
                     if (id && liveNote) {
-                        // Select the note in the store and navigate to the notes page.
                         useNotesStore.getState().selectNote(id)
-                        navigate('/notes')
+                        // Fixed: navigate to the project-scoped notes route
+                        // instead of the bare '/notes' path which doesn't exist.
+                        navigate(`/p/${projectId}/notes`)
                     }
                 }}
                 disabled={isStale}
@@ -102,12 +95,10 @@ function renderNode(
         )
     }
 
-    // Render all children nodes.
     const children = (node.content ?? []).map((child, i) =>
-        renderNode(child, notes, navigate, `${keyPrefix}-${i}`)
+        renderNode(child, notes, navigate, projectId, `${keyPrefix}-${i}`)
     )
 
-    // Map tiptap nodes to HTML elements.
     if (node.type === 'paragraph') {
         if (children.length === 0) return null
         return <p key={keyPrefix}>{children}</p>
@@ -125,6 +116,5 @@ function renderNode(
         return <li key={keyPrefix}>{children}</li>
     }
 
-    // Fallback, if unknown return this
     return <span key={keyPrefix}>{children}</span>
 }

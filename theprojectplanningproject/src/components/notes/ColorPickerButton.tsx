@@ -1,4 +1,20 @@
-﻿import {useEffect, useRef, useState} from 'react'
+﻿// Reusable colour-picker button used in both the toolbar and bubble menu.
+//
+// Renders a button that opens a popover containing:
+//   - A grid of preset swatches (passed in via `swatches` prop)
+//   - A native colour picker for custom colours
+//   - A "Clear" button to remove the current colour
+//
+// The same component is used for text colour and highlight colour with
+// different swatch sets. The `variant` prop adjusts styling for the dark
+// bubble menu vs the light toolbar.
+//
+// Tricky bit: every interactive element inside the popover calls
+// preventDefault on mousedown. Without that, clicking the popover would
+// move focus out of the editor and the colour command would apply to
+// nothing (the editor would have already lost its selection).
+
+import {useEffect, useRef, useState} from 'react'
 
 interface ColorOption {
     name: string
@@ -16,13 +32,6 @@ interface ColorPickerButtonProps {
     variant?: 'light' | 'dark'
 }
 
-/**
- * A toolbar/bubble-menu button that opens a popover containing:
- * - preset colour swatches
- * - a custom colour picker
- * - a "clear" option
- * Used for both text colour and highlight colour.
- */
 export default function ColorPickerButton({
     label,
     icon,
@@ -33,13 +42,12 @@ export default function ColorPickerButton({
     isActive,
     variant = 'light',
 }: ColorPickerButtonProps) {
-    // Whether the popover is open.
     const [isOpen, setIsOpen] = useState(false)
-    // Ref to the whole component so we can detect outside clicks.
+    // Used to detect clicks outside the component to close the popover.
     const containerRef = useRef<HTMLDivElement | null>(null)
 
-    // Close whenever clicking outside.
-
+    // Close on outside click. Only attach the listener when actually open so
+    // we don't pay the cost when most picker buttons on the page are closed.
     useEffect(() => {
         if (!isOpen) return
 
@@ -54,10 +62,13 @@ export default function ColorPickerButton({
         return () => document.removeEventListener('mousedown', onDocMouseDown)
     }, [isOpen])
 
-    // Prevent the editor losing focus when interacting with popup
+    // Standard handler used on every interactive element inside the popover.
+    // preventDefault on mousedown keeps the editor selection alive so colour
+    // commands actually have something to apply to.
     const stopBlur = (e: React.MouseEvent) => e.preventDefault()
 
-    // Styling variants for toolbar vs bubble menu.
+    // Variant-specific styling. Dark variant matches the bubble menu, light
+    // matches the toolbar.
     const buttonBase =
         variant === 'dark'
             ? 'text-gray-200 hover:bg-gray-700 hover:text-white'
@@ -70,7 +81,9 @@ export default function ColorPickerButton({
 
     return (
         <div ref={containerRef} className="relative">
-            {/* Main button that toggles the popover */}
+            {/* The main button. Shows an icon plus a small colour indicator
+                bar underneath, so users can see at a glance what colour is
+                currently applied. */}
             <button
                 type="button"
                 onMouseDown={stopBlur}
@@ -87,18 +100,17 @@ export default function ColorPickerButton({
                 <span className="flex flex-col items-center">
                     {icon}
 
-                    {/* Small colour indicator bar under the icon */}
+                    {/* Coloured indicator bar — shows current colour or
+                        light grey when no colour is set. */}
                     <span
                         className="block w-4 h-0.5 mt-0.5 rounded-sm"
                         style={{backgroundColor: currentColor ?? '#d1d5db'}}
                     />
                 </span>
 
-                {/* Dropdown arrow */}
                 <span className="text-[10px] opacity-60">▾</span>
             </button>
 
-            {/* Popover */}
             {isOpen && (
                 <div
                     onMouseDown={stopBlur}
@@ -133,13 +145,15 @@ export default function ColorPickerButton({
                         })}
                     </div>
 
-                    {/* Custom colour and Clear button */}
+                    {/* Bottom row: custom colour picker and Clear button */}
                     <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+                        {/* Native <input type="color"> wrapped in a label so the
+                            colour wheel preview is also clickable. The actual
+                            input is visually hidden via .sr-only. */}
                         <label
                             onMouseDown={stopBlur}
                             className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer hover:text-gray-800"
                         >
-                            {/* Colour wheel preview */}
                             <span
                                 className="w-5 h-5 rounded border border-gray-200"
                                 style={{
@@ -150,7 +164,6 @@ export default function ColorPickerButton({
 
                             Custom
 
-                            {/* Hidden native colour picker */}
                             <input
                                 type="color"
                                 value={currentColor ?? '#000000'}
@@ -159,7 +172,6 @@ export default function ColorPickerButton({
                             />
                         </label>
 
-                        {/* Clear button */}
                         <button
                             type="button"
                             onMouseDown={stopBlur}

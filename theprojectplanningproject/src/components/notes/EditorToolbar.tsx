@@ -1,4 +1,14 @@
-﻿import {useEditorState, type Editor} from '@tiptap/react'
+﻿// The always-visible top toolbar of the note editor.
+//
+// Includes everything in the editor's command set: marks, headings, lists,
+// alignment, colours, links, code, undo/redo. The bubble menu (which floats
+// over selected text) is a subset of these — block-level actions like
+// "Heading 1" only live here.
+//
+// Buttons show tooltips with their keyboard shortcuts, formatted differently
+// for Mac (⌘) vs other platforms (Ctrl).
+
+import {useEditorState, type Editor} from '@tiptap/react'
 import ColorPickerButton from './ColorPickerButton'
 import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from './ColorSwatches'
 
@@ -12,13 +22,14 @@ interface ToolbarButtonProps {
 }
 
 function ToolbarButton({onClick, isActive, disabled, label, shortcut, children}: ToolbarButtonProps) {
-    // Tooltip text includes shortcut if provided.
     const title = shortcut ? `${label} (${shortcut})` : label
 
     return (
         <button
             type="button"
-            // Prevent the editor from losing focus otherwise formatting would apply to nothing.
+            // preventDefault on mousedown keeps the editor's selection alive.
+            // Without it, clicking the button would blur the editor and
+            // formatting commands would have nothing to operate on.
             onMouseDown={(e) => e.preventDefault()}
             onClick={onClick}
             disabled={disabled}
@@ -43,6 +54,9 @@ interface EditorToolbarProps {
     editor: Editor | null
 }
 
+// Platform-specific shortcut display. Mac uses ⌘/⇧ glyphs; others use the
+// words "Ctrl"/"Shift". Tiptap itself binds both Cmd and Ctrl to the same
+// commands so the actual keys work either way.
 const isMac =
     typeof navigator !== 'undefined' &&
     /Mac|iPod|iPhone|iPad/.test(navigator.platform)
@@ -50,8 +64,10 @@ const isMac =
 const mod = isMac ? '⌘' : 'Ctrl'
 const shift = isMac ? '⇧' : 'Shift'
 
-// The main top toolbar for the editor
 export default function EditorToolbar({editor}: EditorToolbarProps) {
+    // useEditorState subscribes to the editor and only re-renders the
+    // toolbar when one of these selected values changes. Without it,
+    // the toolbar would re-render on every keystroke.
     const state = useEditorState({
         editor,
         selector: ({editor}) => {
@@ -87,8 +103,12 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
     if (!editor || !state) return null
 
-    // Handles link editing.
+    // Three-state link prompt: cancel → no-op, empty → unset, anything else
+    // → apply. extendMarkRange makes the action operate on the whole link
+    // mark even if only part of it is selected.
     function handleLinkClick() {
+        if (!editor) return
+
         const previousUrl = editor.getAttributes('link').href as string | undefined
         const url = window.prompt('Enter URL', previousUrl ?? 'https://')
         if (url === null) return
@@ -101,8 +121,9 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
         editor.chain().focus().extendMarkRange('link').setLink({href: url}).run()
     }
 
-    // Removes all formatting.
+    // Strip marks AND structural nodes — returns the selection to plain text.
     function handleClearFormatting() {
+        if (!editor) return
         editor.chain().focus().unsetAllMarks().clearNodes().run()
     }
 
@@ -111,7 +132,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             flex items-center gap-1 px-3 py-2 border-b border-gray-200
             bg-white sticky top-0 z-10 flex-wrap
         ">
-            {/* Bold */}
+            {/* Inline marks */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleBold().run()}
                 isActive={state.isBold}
@@ -121,7 +142,6 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
                 <strong>B</strong>
             </ToolbarButton>
 
-            {/* Italic */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleItalic().run()}
                 isActive={state.isItalic}
@@ -131,7 +151,6 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
                 <em>I</em>
             </ToolbarButton>
 
-            {/* Underline */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleUnderline().run()}
                 isActive={state.isUnderline}
@@ -141,7 +160,6 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
                 <u>U</u>
             </ToolbarButton>
 
-            {/* Strikethrough */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleStrike().run()}
                 isActive={state.isStrike}
@@ -151,7 +169,6 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
                 <s>S</s>
             </ToolbarButton>
 
-            {/* Link */}
             <ToolbarButton
                 onClick={handleLinkClick}
                 isActive={state.isLink}
@@ -163,7 +180,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
-            {/* Text colour */}
+            {/* Colours */}
             <ColorPickerButton
                 label="Text colour"
                 icon={<span className="text-sm font-bold">A</span>}
@@ -174,7 +191,6 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
                 isActive={!!state.currentColor}
             />
 
-            {/* Highlight */}
             <ColorPickerButton
                 label="Highlight"
                 icon={<span className="text-sm">🖍</span>}
@@ -291,7 +307,7 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
-            {/* Code formatting */}
+            {/* Code + blockquote */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().toggleCode().run()}
                 isActive={state.isCode}
@@ -321,7 +337,6 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
-            {/* Clear formatting */}
             <ToolbarButton
                 onClick={handleClearFormatting}
                 label="Clear formatting"
@@ -331,7 +346,9 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 
-            {/* Undo / Redo */}
+            {/* Undo/redo. Note that Collaboration replaces the default undo
+                stack with a per-user one — Ctrl+Z only undoes YOUR edits,
+                not your collaborator's. canUndo/canRedo reflect that. */}
             <ToolbarButton
                 onClick={() => editor.chain().focus().undo().run()}
                 disabled={!state.canUndo}

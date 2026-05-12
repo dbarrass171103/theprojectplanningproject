@@ -1,6 +1,20 @@
-﻿import {forwardRef, useEffect, useImperativeHandle, useState} from 'react'
+﻿// Dropdown list rendered inside the @mention suggestion popup.
+//
+// Shared by both card and note mention suggestions — the only difference
+// is whether items carry a sublabel (card mentions include the column name;
+// note mentions don't).
+//
+// Uses forwardRef so the parent suggestion handler can call onKeyDown()
+// imperatively. Tiptap's suggestion system intercepts keyboard events before
+// they reach the React tree, so we can't rely on normal React event handlers
+// for arrow-key navigation.
+//
+// Selection state resets whenever the items list changes (the query updated
+// and the results shifted), so the highlighted row doesn't drift to the
+// wrong item as the user types.
 
-// A suggestion item
+import {forwardRef, useEffect, useImperativeHandle, useState} from 'react'
+
 export interface MentionItem {
     id: string
     label: string
@@ -16,26 +30,20 @@ export interface MentionListRef {
     onKeyDown: (props: {event: KeyboardEvent}) => boolean
 }
 
-/**
- * The popup list shown when typing '@'.
- * Uses forwardRef so TipTap can call onKeyDown() directly.
- */
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     function MentionList({items, command}, ref) {
-        // Which item is currently highlighted
         const [selectedIndex, setSelectedIndex] = useState(0)
 
-        // Reset selection when the items list changes
+        // Reset highlight to the first row whenever the filtered list changes.
         useEffect(() => setSelectedIndex(0), [items])
-
-        // Select an item by index and call the command callback.
 
         function selectItem(index: number) {
             const item = items[index]
             if (item) command(item)
         }
 
-        // Keyboard handling
+        // Exposed to the parent via ref so Tiptap can route keyboard events
+        // here even though they never enter the React event system.
         useImperativeHandle(ref, () => ({
             onKeyDown: ({event}) => {
                 if (event.key === 'ArrowUp') {
@@ -66,6 +74,9 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                             key={item.id}
                             type="button"
                             onClick={() => selectItem(index)}
+                            // Sync mouse hover with keyboard selection so the
+                            // two don't fight — moving the mouse snaps the
+                            // highlight to the hovered row.
                             onMouseEnter={() => setSelectedIndex(index)}
                             className={`
                                 w-full text-left px-3 py-1.5 text-sm transition-colors flex items-center justify-between gap-2
@@ -75,10 +86,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                                 }
                             `}
                         >
-                            {/* Main label (card title) */}
                             <span className="truncate">{item.label || 'Untitled'}</span>
 
-                            {/* Sublabel (column title) */}
                             {item.sublabel && (
                                 <span
                                     className={`

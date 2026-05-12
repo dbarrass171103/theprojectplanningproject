@@ -1,4 +1,12 @@
-﻿// Default colour swatches for the highlight, and text colour features.
+﻿// Preset colour palettes for the text-colour and highlight-colour pickers.
+//
+// Hex values are picked to match Tailwind's colour scale, so swatches
+// visually harmonise with the rest of the UI. Comments next to each
+// entry name the Tailwind class for reference.
+//
+// Text colours: at -600 weight so they're readable on white background.
+// Highlights: at -200 weight so dark text remains legible on top.
+
 export const TEXT_COLOR_SWATCHES = [
     {name: 'Default', value: '#1f2937'},   // gray-800
     {name: 'Gray',    value: '#6b7280'},   // gray-500

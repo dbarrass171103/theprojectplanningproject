@@ -1,24 +1,26 @@
-﻿import {ReactRenderer} from '@tiptap/react'
+﻿// Suggestion configuration for @card mentions in the note editor.
+//
+// Passed into the CardMention extension at editor construction time. Controls
+// how items are fetched, how the popup is positioned, and how keyboard events
+// inside the popup are routed.
+//
+// Popup positioning uses @floating-ui rather than a fixed offset — it flips
+// above the cursor when near the bottom of the viewport and shifts inward
+// when near the edges, so the list is always fully visible.
+//
+// The floating container is appended directly to document.body (not a portal
+// inside the editor) to avoid overflow:hidden clipping from editor wrappers.
+
+import {ReactRenderer} from '@tiptap/react'
 import {computePosition, flip, shift, offset} from '@floating-ui/dom'
 import type {SuggestionOptions} from '@tiptap/suggestion'
 import {MentionList, type MentionListRef, type MentionItem} from './MentionList'
 import {useKanbanStore} from '../store/kanbanStore'
 
-/**
- * Creates the suggestion configuration for @card mentions.
- * This is passed into the CardMention extension.
- */
 export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionItem>, 'editor'> {
     return {
         char: '@',
 
-        /**
-         * Build the list of suggestion items based on the user's query.
-         * Pulls from the Kanban store:
-         * - card title
-         * - card ID
-         * - column title (as sublabel)
-         */
         items: ({query}) => {
             const {board} = useKanbanStore.getState()
             const lower = query.toLowerCase()
@@ -31,33 +33,34 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
 
                     const title = card.title || 'Untitled'
 
-                    // Substring match
                     if (title.toLowerCase().includes(lower)) {
                         items.push({
                             id: card.id,
                             label: title,
+                            // Column title shown as sublabel so the user can
+                            // distinguish cards with the same name.
                             sublabel: column.title,
                         } as MentionItem & {sublabel: string})
                     }
                 }
             }
 
-            // Limit to 10 results for readability
             return items.slice(0, 10)
         },
 
-        // Render logic for the popup
         render: () => {
             let component: ReactRenderer<MentionListRef> | null = null
             let floatingEl: HTMLElement | null = null
 
+            // floating-ui needs a reference element with getBoundingClientRect.
+            // We build a virtual one from the cursor rect rather than using the
+            // editor element, so the popup tracks the cursor as the query grows.
             function buildVirtualEl(rect: DOMRect) {
                 return {
                     getBoundingClientRect: () => rect,
                 }
             }
 
-            // Popup relative to cursor
             async function updatePosition(rect: DOMRect | null) {
                 if (!floatingEl || !rect) return
 
@@ -67,9 +70,9 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     {
                         placement: 'bottom-start',
                         middleware: [
-                            offset(4),   // small gap below cursor
-                            flip(),      // flip if near screen edge
-                            shift({padding: 8}), // keep inside viewport
+                            offset(4),
+                            flip(),
+                            shift({padding: 8}),
                         ],
                     }
                 )
@@ -81,7 +84,6 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
             }
 
             return {
-                // called when user types @
                 onStart: props => {
                     component = new ReactRenderer(MentionList, {
                         props,
@@ -90,7 +92,6 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
 
                     if (!props.clientRect) return
 
-                    // floating container
                     floatingEl = document.createElement('div')
                     floatingEl.style.position = 'absolute'
                     floatingEl.style.zIndex = '50'
@@ -100,7 +101,6 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     void updatePosition(props.clientRect())
                 },
 
-                // Called when query changes or items update
                 onUpdate: props => {
                     component?.updateProps(props)
 
@@ -109,7 +109,6 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     }
                 },
 
-                // Keyboard use in the list
                 onKeyDown: props => {
                     if (props.event.key === 'Escape') {
                         floatingEl?.remove()
@@ -119,7 +118,6 @@ export function createCardMentionSuggestion(): Omit<SuggestionOptions<MentionIte
                     return component?.ref?.onKeyDown({event: props.event}) ?? false
                 },
 
-                // Cleanup upon close
                 onExit: () => {
                     floatingEl?.remove()
                     floatingEl = null

@@ -1,4 +1,21 @@
-﻿import {useSortable} from "@dnd-kit/sortable"
+﻿// Individual card in a kanban column.
+//
+// Modes:
+//   - Display mode: shows title + optional description (rendered read-only
+//     via CardDescriptionDisplay). Card is draggable.
+//   - Edit mode: shows title + a Tiptap editor for the description, plus
+//     Save/Cancel. Drag is disabled while editing so cursor interactions
+//     inside the editor don't fight with dnd-kit.
+//
+// Drag-and-drop: registered with @dnd-kit/sortable. dnd-kit gives us refs,
+// listeners, and inline transform styles which we spread onto the root div.
+// We skip these props when editing (the spread is conditional).
+//
+// "Flashing": when a card-mention link is clicked elsewhere in the app, the
+// board sets `isFlashed` on the matched card. We scroll it into view and
+// apply a CSS animation class. The animation itself is defined in editor.css.
+
+import {useSortable} from "@dnd-kit/sortable"
 import {CSS} from "@dnd-kit/utilities"
 import {useEffect, useRef, useState} from "react"
 import type {Card} from "../../types/kanban"
@@ -12,29 +29,22 @@ interface KanbanCardProps {
     isFlashed?: boolean
 }
 
-/**
- * Kanban card. Handles:
- * - drag & drop behaviour
- * - editing the description
- * - deleting the card
- * - flashing when navigated to
- */
 export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps) {
     const deleteCard = useKanbanStore(state => state.deleteCard)
     const updateCardDescription = useKanbanStore(state => state.updateCardDescription)
-    // Whether the card is currently in "edit mode".
+
     const [isEditing, setIsEditing] = useState(false)
-    // Local draft of the description while editing.
+    // Local draft of the description while editing. Committed to the store
+    // only when the user clicks Save (avoids spamming the store + sync engine
+    // with every keystroke).
     const [draft, setDraft] = useState<unknown>(card.description ?? null)
 
-    /**
-     * dnd-kit sortable hook.
-     * - attributes & listeners: props to spread onto the draggable element
-     * - setNodeRef: ref callback required by dnd-kit
-     * - transform & transition: CSS transforms applied during drag
-     * - isDragging: whether this card is currently being dragged
-     * Dragging is disabled while editing.
-     */
+    // dnd-kit's sortable hook gives us everything needed to make this draggable:
+    //   - attributes/listeners: spread onto the draggable element
+    //   - setNodeRef: ref callback dnd-kit uses to track the element
+    //   - transform/transition: live CSS transforms applied during drag
+    //   - isDragging: whether this specific card is being dragged
+    // We disable dragging while editing so editor interactions work normally.
     const {
         attributes,
         listeners,
@@ -44,13 +54,15 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
         isDragging
     } = useSortable({id: card.id, disabled: isEditing})
 
+    // We need our own ref to call scrollIntoView on flash. We compose with
+    // dnd-kit's ref by chaining both in a single setter.
     const elRef = useRef<HTMLDivElement | null>(null)
     function setRef(el: HTMLDivElement | null) {
         elRef.current = el
         setSortableRef(el)
     }
 
-    // When card becomes flashed card, scroll into view
+    // Scroll this card into view when it becomes the flashed card.
     useEffect(() => {
         if (!isFlashed || !elRef.current) return
         elRef.current.scrollIntoView({
@@ -60,10 +72,12 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
         })
     }, [isFlashed])
 
-    // dnd-kit transform to inline style.
+    // Convert dnd-kit's transform value to a CSS string for inline styling.
     const style = {transform: CSS.Transform.toString(transform), transition}
 
     function startEditing() {
+        // Seed the draft with current card state so we don't lose unsaved
+        // changes if the user clicks somewhere else accidentally.
         setDraft(card.description ?? null)
         setIsEditing(true)
     }
@@ -81,7 +95,9 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
         <div
             ref={setRef}
             style={style}
-            // Disable drag attributes/listeners while editing.
+            // Spread dnd-kit's attributes/listeners only when not editing.
+            // While editing, the editor itself handles all pointer/keyboard
+            // interactions and dragging would just get in the way.
             {...(isEditing ? {} : attributes)}
             {...(isEditing ? {} : listeners)}
             className={`
@@ -93,16 +109,17 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
                 ${isFlashed ? 'card-flash' : ''}
             `}
         >
-            {/* Header row: title + action buttons */}
+            {/* Title row + action buttons (edit/delete) */}
             <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-medium text-gray-800 leading-snug break-words">
                     {card.title}
                 </p>
 
                 <div className="flex items-center gap-1 shrink-0">
-                    {/* Edit button */}
                     <button
-                        onPointerDown={(e) => e.stopPropagation()} // Prevent drag start
+                        // Stop pointerdown bubbling to the drag handle —
+                        // otherwise clicking edit would also start a drag.
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={() => isEditing ? cancel() : startEditing()}
                         className="text-gray-300 hover:text-blue-500 transition-colors text-sm leading-none"
                         aria-label={isEditing ? "Cancel edit" : "Edit description"}
@@ -111,7 +128,6 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
                         ✎
                     </button>
 
-                    {/* Delete button */}
                     <button
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={() => deleteCard(columnId, card.id)}
@@ -123,8 +139,8 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
                 </div>
             </div>
 
-            {/* Description section */}
             {isEditing ? (
+                // Edit mode: full description editor + save/cancel buttons.
                 <div className="mt-2 flex flex-col gap-2">
                     <div className="border border-gray-200 rounded p-2 bg-gray-50">
                         <CardDescriptionEditor
@@ -158,7 +174,9 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
                     </div>
                 </div>
             ) : (
-                // Only show description if it exists.
+                // Display mode: only render description block if one exists.
+                // Cards with no description shouldn't have an empty gap below
+                // the title.
                 card.description != null && (
                     <div className="mt-1">
                         <CardDescriptionDisplay doc={card.description}/>

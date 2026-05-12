@@ -15,12 +15,11 @@ interface BacklinkEntry {
 export default function NoteBacklinks({noteId}: NoteBacklinksProps) {
     const board = useKanbanStore(s => s.board)
 
-    // Whether the backlinks list is expanded
     const [isOpen, setIsOpen] = useState(false)
-    // Whether the floating button should appear (only when scrolled to bottom)
-    const [showButton, setShowButton] = useState(false)
+    // Whether the scroll container is at (or near) the bottom.
+    const [atBottom, setAtBottom] = useState(false)
 
-    //Compute backlinks by scanning all cards for @mentions of this note.
+    // Compute backlinks by scanning all cards for @mentions of this note.
     const backlinks = useMemo<BacklinkEntry[]>(() => {
         const result: BacklinkEntry[] = []
 
@@ -43,28 +42,41 @@ export default function NoteBacklinks({noteId}: NoteBacklinksProps) {
         return result
     }, [board, noteId])
 
-    if (backlinks.length === 0) return null
-
-    // Deteects when at the bottom of the notes container
+    // All hooks must be called before any conditional return.
+    // This effect detects when the user is near the bottom of the notes
+    // scroll container so we can show the floating button.
     useEffect(() => {
         const container = document.getElementById('notes-scroll-container')
         if (!container) return
 
         function handleScroll() {
-            const atBottom =
+            if (!container) return
+            const nearBottom =
                 container.scrollTop + container.clientHeight >= container.scrollHeight - 20
-
-            setShowButton(atBottom)
+            setAtBottom(nearBottom)
         }
+
+        // Run once on mount so the button appears immediately if the note is
+        // short enough that the container never scrolls.
+        handleScroll()
 
         container.addEventListener('scroll', handleScroll)
         return () => container.removeEventListener('scroll', handleScroll)
     }, [])
 
+    // Close the list whenever the note changes.
+    useEffect(() => {
+        setIsOpen(false)
+    }, [noteId])
+
+    if (backlinks.length === 0) return null
+
     return (
         <div className="relative">
-            {/* Floating button — appears only when scrolled to bottom */}
-            {showButton && (
+            {/* Show button when at the bottom OR when the list is already open.
+                Previously the button only appeared when scrolled to the bottom,
+                which meant it was permanently hidden on short notes. */}
+            {(atBottom || isOpen) && (
                 <button
                     type="button"
                     onClick={() => setIsOpen(o => !o)}
@@ -78,24 +90,18 @@ export default function NoteBacklinks({noteId}: NoteBacklinksProps) {
                         z-20
                     "
                 >
-                    Card mentions
+                    {isOpen ? 'Hide mentions' : `Card mentions (${backlinks.length})`}
                 </button>
             )}
 
-            {/* Backlinks list */}
             {isOpen && (
-                <ul className="flex flex-col gap-1 px-8 pb-4 pt-4">
+                <ul className="flex flex-col gap-1 px-8 pb-16 pt-4">
                     {backlinks.map(b => (
                         <li
                             key={b.cardId}
                             className="text-sm text-gray-700 flex items-center gap-2"
                         >
-                            <span
-                                className="
-                                    text-xs text-gray-400 bg-white border border-gray-200
-                                    rounded px-1.5 py-0.5
-                                "
-                            >
+                            <span className="text-xs text-gray-400 bg-white border border-gray-200 rounded px-1.5 py-0.5">
                                 {b.columnTitle}
                             </span>
                             <span>{b.cardTitle || 'Untitled card'}</span>

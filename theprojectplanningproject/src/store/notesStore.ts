@@ -1,25 +1,24 @@
 ﻿import {create} from 'zustand'
-import type {Note} from "../types/notes"
+import type {Note} from "../types/notes";
 
-/**
- * The shape of the Notes store.
- * Handles:
- * - creating notes
- * - deleting notes
- * - updating title/content
- * - selecting notes
- * - persistence to localStorage
- */
 interface NotesStore {
+    activeProjectId: string | null
     notes: Record<string, Note>
-    order: string[]              // note IDs in recency order
-    selectedId: string | null    // currently opened note
+    order: string[]
+    selectedId: string | null
+
+    loadForProject: (projectId: string) => void
+    clearActiveProject: () => void
 
     createNote: () => string
     deleteNote: (id: string) => void
     updateNoteTitle: (id: string, title: string) => void
-    updateNoteContent: (id: string, content: unknown) => void
     selectNote: (id: string | null) => void
+    // Called by the Yjs editor on every title change for the active note.
+    // Doesn't bump updatedAt because Yjs awareness updates fire constantly;
+    // we'd flood project_data sync. Title metadata catches up via the
+    // periodic snapshot save.
+    setActiveNoteTitle: (id: string, title: string) => void
 }
 
 interface PersistedState {
@@ -28,130 +27,142 @@ interface PersistedState {
     selectedId: string | null
 }
 
-const STORAGE_KEY = 'notes-store'
+const EMPTY_STATE: PersistedState = {notes: {}, order: [], selectedId: null}
 
-// Load notes from local storage
-function loadState(): PersistedState {
+function storageKey(projectId: string): string {
+    return `notes-store:${projectId}`
+}
+
+function loadState(projectId: string): PersistedState {
     try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        if (!saved) return {notes: {}, order: [], selectedId: null}
+        const saved = localStorage.getItem(storageKey(projectId))
+        if (!saved) return EMPTY_STATE
         return JSON.parse(saved)
     } catch {
-        return {notes: {}, order: [], selectedId: null}
+        return EMPTY_STATE
     }
 }
 
-// Save notes to local storage
-function saveState(state: PersistedState) {
+function saveState(projectId: string, state: PersistedState) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+        localStorage.setItem(storageKey(projectId), JSON.stringify(state))
     } catch (e) {
-        console.warn('Failed to save notes to localStorage', e)
+        console.warn('Failed to save notes store', e)
     }
 }
 
-// Generate a unique ID
+function persistIfActive(
+    activeProjectId: string | null,
+    expectedProjectId: string,
+    state: PersistedState,
+) {
+    if (activeProjectId !== expectedProjectId) return
+    saveState(expectedProjectId, state)
+}
+
 function generateId(): string {
     return `note-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-const initial = loadState()
-
-/**
- * Zustand store for notes.
- * All mutations:
- * - create new objects (immutability)
- * - persist to localStorage
- * - return updated state
- */
 export const useNotesStore = create<NotesStore>((set) => ({
-    notes: initial.notes,
-    order: initial.order,
-    selectedId: initial.selectedId,
+    activeProjectId: null,
+    notes: {},
+    order: [],
+    selectedId: null,
 
-    // Create a new note
+    loadForProject: (projectId) => set(() => {
+        const loaded = loadState(projectId)
+        return {
+            activeProjectId: projectId,
+            notes: loaded.notes,
+            order: loaded.order,
+            selectedId: loaded.selectedId,
+        }
+    }),
+
+    clearActiveProject: () => set(() => ({
+        activeProjectId: null,
+        notes: {},
+        order: [],
+        selectedId: null,
+    })),
+
     createNote: () => {
         const id = generateId()
         const now = Date.now()
-
         const note: Note = {
             id,
             title: 'Untitled',
-            content: null,
             createdAt: now,
             updatedAt: now,
         }
-
         set((state) => {
+            if (!state.activeProjectId) {
+                console.warn('createNote called with no active project')
+                return state
+            }
             const notes = {...state.notes, [id]: note}
             const order = [id, ...state.order]
-
-            saveState({notes, order, selectedId: id})
+            persistIfActive(state.activeProjectId, state.activeProjectId,
+                {notes, order, selectedId: id})
             return {notes, order, selectedId: id}
         })
-
         return id
     },
 
-    // Delete a note
     deleteNote: (id) => set((state) => {
+        if (!state.activeProjectId) return state
         if (!state.notes[id]) return state
-
         const notes = {...state.notes}
         delete notes[id]
-
         const order = state.order.filter(noteId => noteId !== id)
-
-        const selectedId =
-            state.selectedId === id
-                ? (order[0] ?? null)
-                : state.selectedId
-
-        saveState({notes, order, selectedId})
+        const selectedId = state.selectedId === id
+            ? (order[0] ?? null)
+            : state.selectedId
+        persistIfActive(state.activeProjectId, state.activeProjectId,
+            {notes, order, selectedId})
         return {notes, order, selectedId}
     }),
 
-    // Update a notes title
     updateNoteTitle: (id, title) => set((state) => {
+        if (!state.activeProjectId) return state
         const existing = state.notes[id]
         if (!existing) return state
-
         const notes = {
             ...state.notes,
-            [id]: {...existing, title, updatedAt: Date.now()}
+            [id]: {...existing, title, updatedAt: Date.now()},
         }
-
-        // Move this note to the top of the list
         const order = [id, ...state.order.filter(noteId => noteId !== id)]
-
-        saveState({notes, order, selectedId: state.selectedId})
+        persistIfActive(state.activeProjectId, state.activeProjectId,
+            {notes, order, selectedId: state.selectedId})
         return {notes, order}
     }),
 
-    // Update a notes content
-    updateNoteContent: (id, content) => set((state) => {
+    setActiveNoteTitle: (id, title) => set((state) => {
+        if (!state.activeProjectId) return state
         const existing = state.notes[id]
         if (!existing) return state
-
+        if (existing.title === title) return state
         const notes = {
             ...state.notes,
-            [id]: {...existing, content, updatedAt: Date.now()}
+            [id]: {...existing, title, updatedAt: Date.now()},
         }
-
-        const order = [id, ...state.order.filter(noteId => noteId !== id)]
-
-        saveState({notes, order, selectedId: state.selectedId})
-        return {notes, order}
+        // Don't reorder on every keystroke — too noisy. Order updates happen
+        // when the note is initially selected/created or via explicit title
+        // edit (updateNoteTitle).
+        persistIfActive(state.activeProjectId, state.activeProjectId,
+            {notes, order: state.order, selectedId: state.selectedId})
+        return {notes}
     }),
 
-    // Select a note
     selectNote: (id) => set((state) => {
-        saveState({notes: state.notes, order: state.order, selectedId: id})
+        if (!state.activeProjectId) return state
+        persistIfActive(state.activeProjectId, state.activeProjectId,
+            {notes: state.notes, order: state.order, selectedId: id})
         return {selectedId: id}
     }),
 }))
 
-// Returns note object
 export function useSelectedNote(): Note | null {
     const selectedId = useNotesStore(s => s.selectedId)
     const notes = useNotesStore(s => s.notes)

@@ -4,7 +4,10 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@floating-ui/dom": "^1.7.6",
+    "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/vite": "^4.2.4",
+    "@tiptap/extension-collaboration": "^3.23.1",
+    "@tiptap/extension-collaboration-caret": "^3.23.1",
     "@tiptap/extension-highlight": "^3.23.1",
     "@tiptap/extension-link": "^3.23.1",
     "@tiptap/extension-mention": "^3.23.1",
@@ -24,6 +27,7 @@
     "react-router-dom": "^7.15.0",
     "tailwindcss": "^4.2.4",
     "vite": "^8.0.10",
+    "y-protocols": "^1.0.7",
     "zustand": "^5.0.13"
   }
 }

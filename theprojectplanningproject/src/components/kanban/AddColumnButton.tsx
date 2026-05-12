@@ -1,33 +1,30 @@
-﻿import {useState} from "react";
+﻿// Inline form for adding a new kanban column to the board.
+//
+// Sits at the right edge of the column list. Collapsed it's a faded
+// "+ Add column" button; clicked it expands to a small input + Add/Cancel.
+
+import {useState} from "react";
 import {useKanbanStore} from "../../store/kanbanStore";
 
 export default function AddColumnButton() {
     const addColumn = useKanbanStore(state => state.addColumn)
 
-    // Whether the form is expanded or collapsed.
     const [isOpen, setIsOpen] = useState(false)
-    // Controlled input for the column title.
     const [title, setTitle] = useState('')
 
     function handleSubmit() {
-        // Prevent empty column names.
         if (!title.trim()) return
-
-        // Add the column to the store.
         addColumn(title.trim())
-
-        // Reset the form for next use.
         setTitle('')
         setIsOpen(false)
     }
 
-    // Keyboard shortcuts.
     function handleKeyDown(e: React.KeyboardEvent) {
         if (e.key === 'Enter') handleSubmit()
         if (e.key === 'Escape') setIsOpen(false)
     }
 
-    // When the form is closed, show a "+ Add column" button.
+    // Collapsed state.
     if (!isOpen) {
         return (
             <button
@@ -39,10 +36,9 @@ export default function AddColumnButton() {
         )
     }
 
-    // When open, show the full input form.
+    // Expanded form.
     return (
         <div className="bg-gray-100 rounded-xl p-3 w-72 shrink-0 flex flex-col gap-2">
-            {/* Title input */}
             <input
                 autoFocus
                 type="text"
@@ -53,7 +49,6 @@ export default function AddColumnButton() {
                 className="text-sm rounded-lg border border-gray-300 px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
 
-            {/* Action buttons */}
             <div className="flex gap-2">
                 <button
                     onClick={handleSubmit}

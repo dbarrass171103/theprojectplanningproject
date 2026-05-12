@@ -1,32 +1,24 @@
 ﻿import {create} from 'zustand'
-import type {Board, Card, Column} from "../types/kanban"
+import type {Board, Card, Column} from "../types/kanban";
 
-/**
- * The shape of the Kanban store.
- * Handles:
- * - columns
- * - cards
- * - moving cards
- * - updating card content
- * - persistence to localStorage
- */
 interface KanbanStore {
+    activeProjectId: string | null
     board: Board
+
+    loadForProject: (projectId: string) => void
+    clearActiveProject: () => void
+
     addColumn: (title: string) => void
     deleteColumn: (columnId: string) => void
     addCard: (columnId: string, title: string, description?: unknown) => void
     deleteCard: (columnId: string, cardId: string) => void
-    moveCard: (
-        fromColumnId: string,
-        toColumnId: string,
-        cardId: string,
-        toIndex: number
-    ) => void
+    moveCard: (fromColumnId: string, toColumnId: string, cardId: string, toIndex: number) => void
     updateCard: (cardId: string, updates: Partial<Card>) => void
     updateCardDescription: (cardId: string, description: unknown) => void
 }
 
-// Default board
+const EMPTY_BOARD: Board = {columns: [], cards: {}}
+
 const DEFAULT_BOARD: Board = {
     columns: [
         {id: "col-1", title: "To Do", cardIds: []},
@@ -36,183 +28,170 @@ const DEFAULT_BOARD: Board = {
     cards: {}
 }
 
-// Load board from local storage
-function loadBoard(): Board {
+function storageKey(projectId: string): string {
+    return `kanban-board:${projectId}`
+}
+
+function loadBoard(projectId: string): Board {
     try {
-        const saved = localStorage.getItem("kanban-board")
+        const saved = localStorage.getItem(storageKey(projectId))
         return saved ? JSON.parse(saved) : DEFAULT_BOARD
     } catch {
         return DEFAULT_BOARD
     }
 }
 
-// Save board to local storage
-function saveBoard(board: Board) {
-    try {
-        localStorage.setItem('kanban-board', JSON.stringify(board))
-    } catch (e) {
-        console.warn('Failed to save board to localStorage', e)
-    }
+// Debounced save — avoids writing to localStorage on every drag event
+// (which fires many times per second). Writes happen at most once per 300ms.
+let saveTimer: number | null = null
+function saveBoard(projectId: string, board: Board) {
+    if (saveTimer !== null) window.clearTimeout(saveTimer)
+    saveTimer = window.setTimeout(() => {
+        saveTimer = null
+        try {
+            localStorage.setItem(storageKey(projectId), JSON.stringify(board))
+        } catch (e) {
+            console.warn('Failed to save board to localStorage', e)
+        }
+    }, 300)
 }
 
-// Generate a unique Id
 function generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-const initialBoard = loadBoard()
+function withActiveProject<T>(
+    state: KanbanStore,
+    fn: (projectId: string) => T,
+): T | null {
+    if (!state.activeProjectId) {
+        console.warn('Kanban action called with no active project; ignoring')
+        return null
+    }
+    return fn(state.activeProjectId)
+}
 
-/**
- * Zustand store for the Kanban board.
- * All mutations:
- * - create a new board object (immutability)
- * - save to localStorage
- * - return the new board
- */
 export const useKanbanStore = create<KanbanStore>((set) => ({
-    board: initialBoard,
+    activeProjectId: null,
+    board: EMPTY_BOARD,
 
-    // Add a new column
+    loadForProject: (projectId) => set(() => {
+        const board = loadBoard(projectId)
+        return {activeProjectId: projectId, board}
+    }),
+
+    clearActiveProject: () => set(() => ({activeProjectId: null, board: EMPTY_BOARD})),
+
     addColumn: title => set((state) => {
-        const newColumn: Column = {id: generateId(), title, cardIds: []}
-
-        const board = {
-            ...state.board,
-            columns: [...state.board.columns, newColumn]
-        }
-
-        saveBoard(board)
-        return {board}
+        return withActiveProject(state, (projectId) => {
+            const newColumn: Column = {id: generateId(), title, cardIds: []}
+            const board = {...state.board, columns: [...state.board.columns, newColumn]}
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 
-    // Delete a column and its cards
     deleteColumn: (columnId) => set((state) => {
-        const column = state.board.columns.find(c => c.id === columnId)
-        if (!column) return state
-
-        // Remove all cards belonging to this column.
-        const cards = {...state.board.cards}
-        column.cardIds.forEach(id => delete cards[id])
-
-        const board = {
-            columns: state.board.columns.filter(c => c.id !== columnId),
-            cards
-        }
-
-        saveBoard(board)
-        return {board}
+        return withActiveProject(state, (projectId) => {
+            const column = state.board.columns.find(c => c.id === columnId)
+            if (!column) return state
+            const cards = {...state.board.cards}
+            column.cardIds.forEach(id => delete cards[id])
+            const board = {
+                columns: state.board.columns.filter(c => c.id !== columnId),
+                cards
+            }
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 
-    // add a new card
     addCard: (columnId, title, description) => set((state) => {
-        const card: Card = {
-            id: generateId(),
-            title,
-            description,
-            createdAt: Date.now()
-        }
-
-        const columns = state.board.columns.map(col =>
-            col.id === columnId
-                ? {...col, cardIds: [...col.cardIds, card.id]}
-                : col
-        )
-
-        const board = {
-            columns,
-            cards: {...state.board.cards, [card.id]: card}
-        }
-
-        saveBoard(board)
-        return {board}
+        return withActiveProject(state, (projectId) => {
+            const card: Card = {id: generateId(), title, description, createdAt: Date.now()}
+            const columns = state.board.columns.map(col =>
+                col.id === columnId ? {...col, cardIds: [...col.cardIds, card.id]} : col)
+            const board = {columns, cards: {...state.board.cards, [card.id]: card}}
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 
-    // delete a card
     deleteCard: (columnId, cardId) => set((state) => {
-        const columns = state.board.columns.map(col =>
-            col.id === columnId
-                ? {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
-                : col
-        )
-
-        const cards = {...state.board.cards}
-        delete cards[cardId]
-
-        const board = {columns, cards}
-        saveBoard(board)
-        return {board}
+        return withActiveProject(state, (projectId) => {
+            const columns = state.board.columns.map(col =>
+                col.id === columnId
+                    ? {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
+                    : col)
+            const cards = {...state.board.cards}
+            delete cards[cardId]
+            const board = {columns, cards}
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 
-    // Move a card.
     moveCard: (fromColumnId, toColumnId, cardId, toIndex) => set((state) => {
-        const fromColumn = state.board.columns.find(c => c.id === fromColumnId)
-        const toColumn = state.board.columns.find(c => c.id === toColumnId)
-        if (!fromColumn || !toColumn) return state
+        return withActiveProject(state, (projectId) => {
+            const fromColumn = state.board.columns.find(c => c.id === fromColumnId)
+            const toColumn = state.board.columns.find(c => c.id === toColumnId)
+            if (!fromColumn || !toColumn) return state
 
-        const fromIndex = fromColumn.cardIds.indexOf(cardId)
-        if (fromIndex === -1) return state
+            const fromIndex = fromColumn.cardIds.indexOf(cardId)
+            if (fromIndex === -1) return state
 
-        // Fix index when dragging downward inside the same column.
-        let normalisedIndex = toIndex
-        if (fromColumnId === toColumnId && toIndex > fromIndex) {
-            normalisedIndex = toIndex - 1
-        }
-
-        const columns = state.board.columns.map(col => {
-            // Remove from source column (if different).
-            if (col.id === fromColumnId && col.id !== toColumnId) {
-                return {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
+            let normalisedIndex = toIndex
+            if (fromColumnId === toColumnId && toIndex > fromIndex) {
+                normalisedIndex = toIndex - 1
             }
 
-            // Insert into destination column
-            if (col.id === toColumnId) {
-                const ids =
-                    col.id === fromColumnId
+            const columns = state.board.columns.map(col => {
+                if (col.id === fromColumnId && col.id !== toColumnId) {
+                    return {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
+                }
+                if (col.id === toColumnId) {
+                    const ids = col.id === fromColumnId
                         ? col.cardIds.filter(id => id !== cardId)
                         : [...col.cardIds]
-
-                const clamped = Math.max(0, Math.min(normalisedIndex, ids.length))
-                ids.splice(clamped, 0, cardId)
-
-                return {...col, cardIds: ids}
-            }
-
-            return col
-        })
-
-        const board = {...state.board, columns}
-        saveBoard(board)
-        return {board}
+                    const clamped = Math.max(0, Math.min(normalisedIndex, ids.length))
+                    ids.splice(clamped, 0, cardId)
+                    return {...col, cardIds: ids}
+                }
+                return col
+            })
+            const board = {...state.board, columns}
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 
-    // Update card fields
     updateCard: (cardId, updates) => set((state) => {
-        const board = {
-            ...state.board,
-            cards: {
-                ...state.board.cards,
-                [cardId]: {...state.board.cards[cardId], ...updates}
+        return withActiveProject(state, (projectId) => {
+            const board = {
+                ...state.board,
+                cards: {
+                    ...state.board.cards,
+                    [cardId]: {...state.board.cards[cardId], ...updates}
+                }
             }
-        }
-
-        saveBoard(board)
-        return {board}
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 
-    // Update cards description
     updateCardDescription: (cardId, description) => set((state) => {
-        const existing = state.board.cards[cardId]
-        if (!existing) return state
-
-        const board = {
-            ...state.board,
-            cards: {
-                ...state.board.cards,
-                [cardId]: {...existing, description}
+        return withActiveProject(state, (projectId) => {
+            const existing = state.board.cards[cardId]
+            if (!existing) return state
+            const board = {
+                ...state.board,
+                cards: {
+                    ...state.board.cards,
+                    [cardId]: {...existing, description}
+                }
             }
-        }
-
-        saveBoard(board)
-        return {board}
+            saveBoard(projectId, board)
+            return {board}
+        }) ?? state
     }),
 }))

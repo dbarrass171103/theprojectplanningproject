@@ -1,4 +1,16 @@
-﻿import {BubbleMenu} from '@tiptap/react/menus'
+﻿// The floating menu that appears above selected text in the note editor.
+//
+// Distinct from the always-visible EditorToolbar at the top of the editor —
+// the bubble menu is a quick-access set of inline-relevant actions (text
+// formatting, alignment, colours, links) that pops up where the user is
+// currently working. Block-level actions like headings and lists live only
+// in the top toolbar.
+//
+// The dark colour scheme is deliberate: lets the menu stand out against
+// the document background and signals "ephemeral overlay" rather than
+// "permanent UI."
+
+import {BubbleMenu} from '@tiptap/react/menus'
 import {useEditorState, type Editor} from '@tiptap/react'
 import ColorPickerButton from './ColorPickerButton'
 import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from './ColorSwatches'
@@ -6,6 +18,7 @@ import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from './ColorSwatches'
 interface EditorBubbleMenuProps {
     editor: Editor | null
 }
+
 interface BubbleButtonProps {
     onClick: () => void
     isActive?: boolean
@@ -13,11 +26,16 @@ interface BubbleButtonProps {
     children: React.ReactNode
 }
 
+// Small button used throughout the bubble menu. Factored out so each
+// formatting button doesn't duplicate the class/aria boilerplate.
 function BubbleButton({onClick, isActive, label, children}: BubbleButtonProps) {
     return (
         <button
             type="button"
-            onMouseDown={(e) => e.preventDefault()} // Prevent editor losing focus
+            // Prevent the editor from losing focus on mousedown. Without this,
+            // clicking a button would clear the selection and the toggle
+            // commands below would have nothing to apply to.
+            onMouseDown={(e) => e.preventDefault()}
             onClick={onClick}
             aria-label={label}
             aria-pressed={isActive}
@@ -35,17 +53,10 @@ function BubbleButton({onClick, isActive, label, children}: BubbleButtonProps) {
     )
 }
 
-/**
- * The bubble menu that appears above highlighted text.
- * Includes:
- * - bold/italic/underline/strike/code
- * - text colour and highlight colour
- * - alignment
- * - superscript/subscript
- * - link editing
- * - clear formatting
- */
 export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
+    // useEditorState subscribes to the editor and only re-renders this
+    // component when one of the selected values actually changes. Avoids
+    // re-rendering the bubble menu on every keystroke.
     const state = useEditorState({
         editor,
         selector: ({editor}) => {
@@ -72,12 +83,14 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
 
     if (!editor) return null
 
-    /**
-     * Prompt-based link editing.
-     * - If URL is empty, remove link
-     * - If URL is provided, set/update link
-     */
+    // Prompt the user for a URL using a native prompt. Three outcomes:
+    //   - Cancel (null): do nothing
+    //   - Empty string: remove the link mark from the selection
+    //   - Non-empty: set/update the link mark
+    // extendMarkRange makes the action operate on the entire link mark
+    // even if only part of it is selected.
     function handleLinkClick() {
+        if (!editor) return
         const previousUrl = editor.getAttributes('link').href as string | undefined
         const url = window.prompt('Enter URL', previousUrl ?? 'https://')
         if (url === null) return
@@ -90,8 +103,10 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
         editor.chain().focus().extendMarkRange('link').setLink({href: url}).run()
     }
 
-    // Remove all formatting
+    // Strip both marks (bold/italic/etc) AND structural nodes (h1, lists,
+    // blockquote) from the selection, returning to plain paragraphs.
     function handleClearFormatting() {
+        if (!editor) return
         editor.chain().focus().unsetAllMarks().clearNodes().run()
     }
 
@@ -102,7 +117,9 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
                 placement: 'top',
                 offset: 8,
             }}
-            // Controls when menu should appear
+            // Only show the menu when there's an actual selection (from !== to)
+            // and not inside a code block — code blocks should look like raw
+            // code, not formatted text.
             shouldShow={({editor, from, to}) => {
                 if (from === to) return false
                 if (editor.isActive('codeBlock')) return false
@@ -111,7 +128,7 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
         >
             <div className="flex items-center gap-0.5 bg-gray-800 rounded-lg shadow-lg px-1 py-1">
 
-                {/* Basic formatting */}
+                {/* Inline marks: bold, italic, underline, strike, code */}
                 <BubbleButton
                     onClick={() => editor.chain().focus().toggleBold().run()}
                     isActive={state?.isBold}
@@ -154,7 +171,7 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
 
                 <div className="w-px h-5 bg-gray-600 mx-0.5"/>
 
-                {/* Text colour */}
+                {/* Colours */}
                 <ColorPickerButton
                     label="Text colour"
                     icon={<span className="text-sm font-bold">A</span>}
@@ -166,7 +183,6 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
                     variant="dark"
                 />
 
-                {/* Highlight colour */}
                 <ColorPickerButton
                     label="Highlight"
                     icon={<span className="text-sm">🖍</span>}
@@ -182,7 +198,7 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
 
                 <div className="w-px h-5 bg-gray-600 mx-0.5"/>
 
-                {/* Alignment */}
+                {/* Text alignment */}
                 <BubbleButton
                     onClick={() => editor.chain().focus().setTextAlign('left').run()}
                     isActive={state?.alignLeft}
@@ -228,7 +244,7 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
 
                 <div className="w-px h-5 bg-gray-600 mx-0.5"/>
 
-                {/* Link */}
+                {/* Link + clear */}
                 <BubbleButton
                     onClick={handleLinkClick}
                     isActive={state?.isLink}
@@ -237,7 +253,6 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
                     🔗
                 </BubbleButton>
 
-                {/* Clear formatting */}
                 <BubbleButton
                     onClick={handleClearFormatting}
                     label="Clear formatting"
