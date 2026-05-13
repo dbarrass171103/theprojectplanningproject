@@ -5,6 +5,11 @@ import {useKanbanStore} from '../../store/kanbanStore'
 import {useNotesStore} from '../../store/notesStore'
 import {startSyncForProject, stopSync} from '../../sync/syncEngine'
 
+/**
+ * Reads the URL fragment to extract invite tokens. (the bit after #)
+ * Example: /p/123#tok=abc&admin=xyz
+ * Tokens are used to join a project or grant admin rights.
+ */
 function parseTokenFragment(): {memberToken?: string; adminToken?: string} {
     const hash = window.location.hash
     if (!hash || hash.length <= 1) return {}
@@ -15,10 +20,15 @@ function parseTokenFragment(): {memberToken?: string; adminToken?: string} {
     }
 }
 
+/**
+ * Removes the #fragment from the URL without reloading the page.
+ * This keeps the URL clean after tokens have been processed.
+ */
 function clearFragment() {
     history.replaceState(null, '', window.location.pathname + window.location.search)
 }
 
+// The states the guard can be in.
 type Phase =
     | {kind: 'loading'}
     | {kind: 'needs-name'; projectId: string; memberToken: string; adminToken?: string}
@@ -26,28 +36,46 @@ type Phase =
     | {kind: 'error'; message: string}
 
 export default function ProjectGuard() {
+    // Get the projectId from the URL (e.g. /p/projectId)
     const {projectId} = useParams<{projectId: string}>()
+
     const navigate = useNavigate()
+
+    // Zustand store selectors
     const knownProjects = useProjectsStore(s => s.knownProjects)
     const setCurrentProject = useProjectsStore(s => s.setCurrentProject)
     const joinProject = useProjectsStore(s => s.joinProject)
+
     const loadKanban = useKanbanStore(s => s.loadForProject)
     const clearKanban = useKanbanStore(s => s.clearActiveProject)
+
     const loadNotes = useNotesStore(s => s.loadForProject)
     const clearNotes = useNotesStore(s => s.clearActiveProject)
 
+    // Local UI state
     const [phase, setPhase] = useState<Phase>({kind: 'loading'})
     const [displayName, setDisplayName] = useState('')
     const [joining, setJoining] = useState(false)
 
+    /**
+     * Determines whether the user:
+     *  - has access to the project
+     *  - is joining through an invitation link
+     *  - has no access at all
+     */
     useEffect(() => {
         if (!projectId) return
 
         const {memberToken, adminToken} = parseTokenFragment()
 
+        // If user already knows this project
         if (knownProjects[projectId]) {
             setCurrentProject(projectId)
+
+            // If they opened an invitation link but already have access, clean the URL
             if (memberToken) clearFragment()
+
+            // If admin token is present and not stored yet, store it
             if (adminToken && !knownProjects[projectId].adminToken) {
                 useProjectsStore.setState((state) => ({
                     knownProjects: {
@@ -59,38 +87,45 @@ export default function ProjectGuard() {
                     },
                 }))
             }
+
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPhase({kind: 'ready'})
             return
         }
 
+        // If user is joining through invite link
         if (memberToken) {
             setPhase({kind: 'needs-name', projectId, memberToken, adminToken})
             return
         }
 
+        // if user has no access
         setPhase({
             kind: 'error',
             message: "You don't have access to this project. If you have an invite link, open it again.",
         })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [projectId])
 
-    // Once ready, load local data and start the sync engine. The sync engine
-    // will overlay server data on top of local during initial fetch (server
-    // wins per user's choice), then keep them in sync via push/realtime.
+    /**
+     * Once the project is ready:
+     *  - Load local Kanban + Notes data immediately
+     *  - Start the sync engine (fetch server data + realtime updates)
+     *  - Clean up when leaving the project
+     */
     useEffect(() => {
         if (phase.kind !== 'ready' || !projectId) return
 
-        // Load local first so the UI has *something* to render while sync
-        // initialises. Sync will replace this with server data shortly.
+        // Load cached local data first
         loadKanban(projectId)
         loadNotes(projectId)
 
+        // Start sync engine using stored project info
         const project = useProjectsStore.getState().knownProjects[projectId]
         if (project) {
             startSyncForProject(project)
         }
 
+        // Cleanup when navigating away
         return () => {
             stopSync()
             clearKanban()
@@ -99,13 +134,20 @@ export default function ProjectGuard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [phase.kind, projectId])
 
+    /**
+     * Handles joining a project when the user enters their display name.
+     * Triggered when phase.kind === 'needs-name'.
+     */
     async function handleJoin() {
         if (phase.kind !== 'needs-name') return
         if (!displayName.trim()) return
 
         setJoining(true)
         try {
+            // Join the project using the invite token
             await joinProject(phase.projectId, phase.memberToken, displayName.trim())
+
+            // If admin token was included, store it
             if (phase.adminToken) {
                 useProjectsStore.setState((state) => {
                     const project = state.knownProjects[phase.projectId]
@@ -118,6 +160,7 @@ export default function ProjectGuard() {
                     }
                 })
             }
+
             clearFragment()
             setPhase({kind: 'ready'})
         } catch (e) {
@@ -129,6 +172,10 @@ export default function ProjectGuard() {
             setJoining(false)
         }
     }
+
+    /**
+     * UI for each phase of the state machine.
+     */
 
     if (phase.kind === 'loading') {
         return (
@@ -162,6 +209,8 @@ export default function ProjectGuard() {
                     <p className="text-sm text-gray-500 mb-4">
                         What should we call you in this project?
                     </p>
+
+                    {/* Display name input */}
                     <input
                         autoFocus
                         type="text"
@@ -175,9 +224,12 @@ export default function ProjectGuard() {
                         placeholder="Your name"
                         className="text-sm rounded-lg border border-gray-300 px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-400 mb-3"
                     />
+
                     <p className="text-xs text-gray-400 mb-4">
                         Just a label, not verified. Other members will see this on your edits.
                     </p>
+
+                    {/* Join button */}
                     <button
                         onClick={handleJoin}
                         disabled={!displayName.trim() || joining}
@@ -190,5 +242,9 @@ export default function ProjectGuard() {
         )
     }
 
+    /**
+     * When ready, render the nested project routes.
+     * <Outlet/> is where child routes (Board, Notes, etc.) appear.
+     */
     return <Outlet/>
 }

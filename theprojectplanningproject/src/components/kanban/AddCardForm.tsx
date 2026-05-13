@@ -92,7 +92,7 @@ export default function AddCardForm({columnId}: AddCardFormProps) {
                     onChange={setDescription}
                     onSubmit={handleSubmit}
                     onCancel={() => setIsOpen(false)}
-                    placeholder="Description (optional) — type @ to link a note"
+                    placeholder="Description (optional) "
                 />
             </div>
 
