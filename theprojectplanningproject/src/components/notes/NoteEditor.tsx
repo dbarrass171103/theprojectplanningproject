@@ -1,4 +1,8 @@
-﻿import {useEditor, EditorContent} from '@tiptap/react'
+﻿// Collaborative note editor bound to a Y.Doc. The outer component gates on
+// sync state; SyncedNoteEditor wires up the actual editor once the doc is
+// ready.
+
+import {useEditor, EditorContent} from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import {TextAlign} from '@tiptap/extension-text-align'
@@ -10,14 +14,13 @@ import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
 import * as Y from 'yjs'
 import {Awareness} from 'y-protocols/awareness'
-import {useEffect, useMemo, useRef, useState} from 'react'
+import {useEffect, useState} from 'react'
 import {useNavigate} from 'react-router-dom'
 import type {Note} from '../../types/notes'
 import {useNotesStore} from '../../store/notesStore'
 import {useKanbanStore} from '../../store/kanbanStore'
 import {useCurrentProject, type KnownProject} from '../../store/projectsStore'
-import {getSupabaseForProject} from '../../lib/supabase'
-import {SupabaseYjsProvider} from '../../sync/SupabaseYjsProvider'
+import {useSyncedYDoc} from '../../sync/useSyncedYDoc'
 import {colorForName} from '../../utils/userColor'
 import {CardMention} from '../../tiptap/CardMention'
 import {createCardMentionSuggestion} from '../../tiptap/cardMentionSuggestion'
@@ -31,50 +34,17 @@ interface NoteEditorProps {
 
 const TITLE_FIELD = 'title'
 
-// Outer wrapper — owns Y.Doc + provider lifecycle, waits for sync, then mounts
-// SyncedNoteEditor with a populated doc.
 export default function NoteEditor({note}: NoteEditorProps) {
     const project = useCurrentProject()
-    const doc = useMemo(() => new Y.Doc(), [])
-    const awareness = useMemo(() => new Awareness(doc), [doc])
-    const [synced, setSynced] = useState(false)
-    const providerRef = useRef<SupabaseYjsProvider | null>(null)
 
-    useEffect(() => {
-        if (!project) return
+    const {doc, awareness, synced} = useSyncedYDoc({
+        project,
+        docKey: note.id,
+        channelPrefix: 'note',
+        snapshotTable: 'note_documents',
+    })
 
-        const client = getSupabaseForProject(project.memberToken, project.adminToken)
-        const user = {
-            name: project.displayName,
-            color: colorForName(project.displayName),
-        }
-
-        const provider = new SupabaseYjsProvider({
-            client,
-            projectId: project.id,
-            noteId: note.id,
-            doc,
-            awareness,
-            user,
-            onSync: () => setSynced(true),
-        })
-        providerRef.current = provider
-        void provider.connect()
-
-        return () => {
-            provider.destroy()
-            providerRef.current = null
-            // DO NOT call doc.destroy() here. The provider captures the
-            // doc state synchronously during destroy() and fire-and-forgets
-            // the upload. Destroying the doc here would race with the
-            // upload's encoding step.
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [project?.id, note.id])
-
-    if (!project) {
-        return null
-    }
+    if (!project) return null
 
     if (!synced) {
         return (
@@ -119,6 +89,7 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
 
     const [titleValue, setTitleValue] = useState('')
 
+    // Keep the title input in sync with the Y.Text.
     useEffect(() => {
         const yTitle = doc.getText(TITLE_FIELD)
 
@@ -130,10 +101,8 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
 
         sync()
         yTitle.observe(sync)
-        return () => {
-            yTitle.unobserve(sync)
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        return () => yTitle.unobserve(sync)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [doc, note.id])
 
     function handleTitleChange(newValue: string) {
@@ -149,10 +118,6 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
 
     const editor = useEditor({
         extensions: [
-            // StarterKit v3 already includes Link and Underline — we do NOT
-            // import them separately, which previously caused "Duplicate
-            // extension names" warnings and silent content drops during
-            // Yjs schema reconciliation.
             StarterKit.configure({
                 undoRedo: false,
                 link: {
@@ -192,6 +157,8 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
             attributes: {
                 class: 'prose-editor focus:outline-none min-h-[60vh] px-8 py-6',
             },
+            // Intercept clicks on card-mention chips: navigate to the
+            // board and flash the target card.
             handleClickOn: (_view, _pos, _node, _nodePos, event) => {
                 const target = event.target as HTMLElement | null
                 const chipEl = target?.closest('[data-card-mention]') as HTMLElement | null
@@ -211,15 +178,17 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
                 return true
             },
         },
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [doc, awareness, project.displayName])
 
+    // Mark card mentions whose target has been deleted so they render as
+    // stale. Subscribes to both editor 'update' (chip might be inserted)
+    // and kanbanStore (card might be deleted).
     useEffect(() => {
         if (!editor) return
 
         function applyStaleClasses() {
-            const root = editor?.view.dom
-            if (!root) return
+            const root = editor.view.dom
             const {board} = useKanbanStore.getState()
             const chips = root.querySelectorAll<HTMLElement>('[data-card-mention]')
             chips.forEach(chip => {

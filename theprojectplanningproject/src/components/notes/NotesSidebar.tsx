@@ -1,13 +1,5 @@
-﻿// Sidebar for the notes page — lists all notes in the current project and
-// lets the user select, create, or delete them.
-//
-// Collapsible. When collapsed, shrinks to a 40px-wide strip with just an
-// expand chevron. When expanded, shows the full list with new-note button
-// and per-note delete button (only visible on row hover).
-//
-// The list order comes from `notesStore.order` which is maintained by the
-// store (recent-first, bumping on title or content updates). We render in
-// that order directly — no sorting here.
+﻿// Sidebar listing all notes in the current project. Collapsible: collapsed
+// shows a narrow strip, expanded shows the full list with actions.
 
 import {useNotesStore} from "../../store/notesStore";
 
@@ -24,7 +16,6 @@ export default function NotesSidebar({isOpen, onToggle}: NotesSidebarProps) {
     const selectNote = useNotesStore(s => s.selectNote)
     const deleteNote = useNotesStore(s => s.deleteNote)
 
-    // Collapsed state — just an expand button.
     if (!isOpen) {
         return (
             <div className="border-r border-gray-200 bg-white w-10 shrink-0 flex flex-col items-center py-3">
@@ -40,11 +31,8 @@ export default function NotesSidebar({isOpen, onToggle}: NotesSidebarProps) {
         )
     }
 
-    // Expanded state.
     return (
         <aside className="border-r border-gray-200 bg-white w-64 shrink-0 flex flex-col">
-
-            {/* Header: title + add + collapse */}
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
                 <h2 className="text-sm font-semibold text-gray-700">Notes</h2>
 
@@ -69,7 +57,6 @@ export default function NotesSidebar({isOpen, onToggle}: NotesSidebarProps) {
                 </div>
             </div>
 
-            {/* List body */}
             <div className="flex-1 overflow-y-auto">
                 {order.length === 0 ? (
                     <div className="px-3 py-4 text-xs text-gray-400 text-center">
@@ -79,8 +66,6 @@ export default function NotesSidebar({isOpen, onToggle}: NotesSidebarProps) {
                     <ul className="py-1">
                         {order.map(id => {
                             const note = notes[id]
-                            // Guard against transient ordering/notes mismatches —
-                            // can happen briefly during a sync update.
                             if (!note) return null
 
                             const isSelected = id === selectedId
@@ -88,8 +73,6 @@ export default function NotesSidebar({isOpen, onToggle}: NotesSidebarProps) {
                             return (
                                 <li key={id}>
                                     <div
-                                        // `group` enables the hover-reveal pattern on the
-                                        // delete button below.
                                         className={`
                                             group flex items-center justify-between px-3 py-2 cursor-pointer
                                             transition-colors
@@ -106,12 +89,8 @@ export default function NotesSidebar({isOpen, onToggle}: NotesSidebarProps) {
                                             {note.title || 'Untitled'}
                                         </span>
 
-                                        {/* Delete button — hidden by default, fades in on
-                                            row hover via the `group-hover` opacity trick. */}
                                         <button
                                             onClick={(e) => {
-                                                // Stop the row's onClick from firing
-                                                // (which would select the note we're deleting).
                                                 e.stopPropagation()
                                                 if (confirm(`Delete "${note.title || 'Untitled'}"?`)) {
                                                     deleteNote(id)

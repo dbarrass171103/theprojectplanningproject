@@ -1,13 +1,17 @@
-﻿import {EditorContent, useEditor} from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
+﻿// Collaborative Tiptap editor for a card's description. Binds directly to
+// the card's Y.XmlFragment via the Collaboration extension. Mounted only
+// while a card is in edit mode; display mode is handled separately.
+
+import {EditorContent, useEditor} from '@tiptap/react'
 import Placeholder from '@tiptap/extension-placeholder'
-import {NoteMention} from '../../tiptap/NoteMention'
-import {createNoteMentionSuggestion} from '../../tiptap/noteMentionSuggestion'
-import {useEffect, useRef} from 'react'
+import {createCardDescriptionExtensions} from '../../tiptap/cardDescriptionExtensions'
+import Collaboration from '@tiptap/extension-collaboration'
+import * as Y from 'yjs'
+import {useEffect, useMemo} from 'react'
+import {useKanbanStore} from '../../store/kanbanStore'
 
 interface CardDescriptionEditorProps {
-    initialContent: unknown
-    onChange: (doc: unknown) => void
+    cardId: string
     onSubmit?: () => void
     onCancel?: () => void
     autoFocus?: boolean
@@ -15,40 +19,32 @@ interface CardDescriptionEditorProps {
 }
 
 export default function CardDescriptionEditor({
-    initialContent,
-    onChange,
+    cardId,
     onSubmit,
     onCancel,
     autoFocus,
     placeholder = "Description...",
 }: CardDescriptionEditorProps) {
+    const fragment = useMemo(
+        () => useKanbanStore.getState().getCardDescriptionFragment(cardId),
+        [cardId],
+    )
 
     const editor = useEditor({
-        extensions: [
-            StarterKit.configure({
-                heading: false,
-                codeBlock: false,
-                blockquote: false,
-                horizontalRule: false,
-            }),
+        extensions: fragment ? [
+            ...createCardDescriptionExtensions({collaboration: true}),
             Placeholder.configure({placeholder}),
-            NoteMention.configure({
-                suggestion: createNoteMentionSuggestion(),
+            Collaboration.configure({
+                fragment: fragment as unknown as Y.XmlFragment,
             }),
-        ],
+        ] : [],
 
-        content: initialContent ?? '',
         autofocus: autoFocus ? 'end' : false,
-
-        onUpdate: ({editor}) => {
-            onChange(editor.getJSON())
-        },
 
         editorProps: {
             attributes: {
                 class: 'prose-editor card-description-editor focus:outline-none text-sm',
             },
-
             handleKeyDown: (_view, event) => {
                 if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault()
@@ -63,28 +59,23 @@ export default function CardDescriptionEditor({
                 return false
             },
         },
-    })
-
-    // Track previous initialContent with a ref to avoid putting
-    // JSON.stringify in the dependency array, which creates a new string on
-    // every render and can cause infinite update loops.
-    const prevContentRef = useRef<unknown>(initialContent)
+    // Recreate the editor if the fragment identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fragment])
 
     useEffect(() => {
-        if (!editor) return
-
-        const prev = prevContentRef.current
-        prevContentRef.current = initialContent
-
-        const emptyDoc = {type: 'doc', content: [{type: 'paragraph'}]}
-        const incoming = initialContent ?? emptyDoc
-
-        // Only update if the incoming content is actually different from what
-        // the editor currently shows. Avoids clobbering the user's cursor.
-        if (JSON.stringify(prev) !== JSON.stringify(incoming)) {
-            editor.commands.setContent(incoming as never, {emitUpdate: false})
+        if (!fragment) {
+            console.warn(`CardDescriptionEditor: no Y.XmlFragment for card ${cardId}`)
         }
-    }, [editor, initialContent])
+    }, [fragment, cardId])
+
+    if (!fragment) {
+        return (
+            <div className="card-description-editor text-sm text-gray-400 italic">
+                Loading description…
+            </div>
+        )
+    }
 
     return <EditorContent editor={editor}/>
 }

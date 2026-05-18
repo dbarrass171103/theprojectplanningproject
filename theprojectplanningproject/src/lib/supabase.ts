@@ -1,4 +1,7 @@
-﻿import {createClient, type SupabaseClient} from '@supabase/supabase-js'
+﻿// Supabase client factory with per-project auth headers. Clients are
+// cached by header signature to avoid rebuilding on every request.
+
+import {createClient, type SupabaseClient} from '@supabase/supabase-js'
 
 const url = 'https://boqzceccrhragjopnmwz.supabase.co'
 const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
@@ -9,9 +12,6 @@ if (!url || !anonKey) {
     )
 }
 
-// Supabase configures headers at client construction time (no per-query API).
-// Since our auth headers depend on the current project, we cache clients
-// keyed by header content and rebuild only when needed.
 const clientCache = new Map<string, SupabaseClient>()
 
 interface ClientOptions {
@@ -43,11 +43,10 @@ export function getSupabase(opts: ClientOptions = {}): SupabaseClient {
     return client
 }
 
-// Token-less client for the project-creation path.
+/** Token-less client, used for project creation. */
 export const supabase = getSupabase()
 
-// Common case: client authenticated as a member (optionally admin) of a
-// specific project.
+/** Project-scoped client with member token (and optional admin token). */
 export function getSupabaseForProject(
     memberToken: string,
     adminToken?: string,

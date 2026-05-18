@@ -1,17 +1,11 @@
-﻿// Notes page — a two-panel layout: collapsible sidebar on the left, editor
-// (or empty state) on the right.
-//
-// The sidebar manages selection and creation. The editor is keyed on
-// selectedNote.id so React unmounts and remounts it when the user switches
-// notes, which resets all editor state cleanly without manual teardown.
-//
-// Empty state logic distinguishes between "no notes exist at all" and
-// "notes exist but none is selected" so the copy and CTA stay relevant.
+﻿// Notes page: sidebar on the left, editor or empty state on the right.
+// The editor is keyed by note ID so switching notes fully remounts it.
 
 import {useState} from 'react'
 import {useNotesStore, useSelectedNote} from '../store/notesStore'
-import NotesSidebar from "../components/notes/NotesSidebar.tsx";
-import NoteEditor from "../components/notes/NoteEditor.tsx";
+import NotesSidebar from "../components/notes/NotesSidebar.tsx"
+import NoteEditor from "../components/notes/NoteEditor.tsx"
+
 export default function NotesPage() {
     const [sidebarOpen, setSidebarOpen] = useState(true)
     const selectedNote = useSelectedNote()
@@ -27,8 +21,6 @@ export default function NotesPage() {
 
             <div className="flex-1 overflow-hidden bg-white">
                 {selectedNote ? (
-                    // Key on note ID so the editor fully remounts on note change —
-                    // simpler and safer than trying to reset Tiptap/Yjs state in place.
                     <NoteEditor key={selectedNote.id} note={selectedNote}/>
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full text-center px-6">

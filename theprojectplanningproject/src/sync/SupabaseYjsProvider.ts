@@ -1,31 +1,34 @@
-﻿import * as Y from 'yjs'
+﻿// Realtime Y.Doc provider backed by a Supabase channel for live updates and
+// a Postgres table for snapshot persistence.
+
+import * as Y from 'yjs'
 import {Awareness, encodeAwarenessUpdate, applyAwarenessUpdate} from 'y-protocols/awareness'
 import type {RealtimeChannel, SupabaseClient} from '@supabase/supabase-js'
-
-// A custom Yjs network provider built on Supabase Realtime broadcast channels.
-//
-// Architecture summary:
-//   - On connect, fetch the most recent snapshot from `note_documents` and
-//     apply it. This brings us up to date with the server's persisted state.
-//   - Subscribe to a per-note broadcast channel. Other clients editing the
-//     same note are also subscribed; we relay Yjs updates through it.
-//   - Send a sync-request on subscribe; already-connected peers respond with
-//     their full state. This handles in-memory content that hasn't been
-//     snapshotted yet — without it, late joiners would only see the snapshot.
-//   - Local Y.Doc 'update' events are encoded as base64 and broadcast.
-//   - Awareness changes (caret position, user info) ride a separate event.
-//   - Every N seconds after the last edit, persist a snapshot to the DB.
-//   - As a safety net, refetch the snapshot every 30 seconds to recover from
-//     any dropped broadcast messages.
 
 export interface SupabaseYjsProviderOptions {
     client: SupabaseClient
     projectId: string
-    noteId: string
+
+    docKey: string
+    channelPrefix: string
+    snapshotTable: 'note_documents' | 'board_documents'
+
     doc: Y.Doc
     awareness: Awareness
     user: {name: string; color: string}
+
     onSync?: () => void
+    /**
+     * Fires 'connecting' at the start of connect(), then 'connected' or
+     * 'offline' as the channel subscription progresses.
+     */
+    onStatusChange?: (status: 'connecting' | 'connected' | 'offline') => void
+    /**
+     * Called when a doc-update broadcast is received from a remote peer.
+     * `by` is the display name of the user who made the change.
+     */
+    onRemoteUpdate?: (by: string) => void
+
     snapshotDebounceMs?: number
     resyncIntervalMs?: number
 }
@@ -58,11 +61,16 @@ function base64ToUint8(b64: string): Uint8Array {
 export class SupabaseYjsProvider {
     private client: SupabaseClient
     private projectId: string
-    private noteId: string
+    private docKey: string
+    private channelPrefix: string
+    private snapshotTable: 'note_documents' | 'board_documents'
+
     public doc: Y.Doc
     public awareness: Awareness
     private user: {name: string; color: string}
     private onSyncCallback?: () => void
+    private onStatusChangeCallback?: (status: 'connecting' | 'connected' | 'offline') => void
+    private onRemoteUpdateCallback?: (by: string) => void
 
     private channel: RealtimeChannel | null = null
     private channelReady = false
@@ -79,17 +87,25 @@ export class SupabaseYjsProvider {
     constructor(opts: SupabaseYjsProviderOptions) {
         this.client = opts.client
         this.projectId = opts.projectId
-        this.noteId = opts.noteId
+        this.docKey = opts.docKey
+        this.channelPrefix = opts.channelPrefix
+        this.snapshotTable = opts.snapshotTable
         this.doc = opts.doc
         this.awareness = opts.awareness
         this.user = opts.user
         this.onSyncCallback = opts.onSync
+        this.onStatusChangeCallback = opts.onStatusChange
+        this.onRemoteUpdateCallback = opts.onRemoteUpdate
         this.snapshotDebounceMs = opts.snapshotDebounceMs ?? DEFAULT_SNAPSHOT_DEBOUNCE
         this.resyncIntervalMs = opts.resyncIntervalMs ?? DEFAULT_RESYNC_INTERVAL
     }
 
     async connect() {
         if (this.destroyed) return
+
+        // Signal immediately so the UI shows "Connecting" rather than
+        // staying on whatever state it had previously.
+        this.onStatusChangeCallback?.('connecting')
 
         this.awareness.setLocalStateField('user', {
             name: this.user.name,
@@ -111,21 +127,16 @@ export class SupabaseYjsProvider {
 
     destroy() {
         if (this.destroyed) return
-        // Remember whether we ever truly subscribed before flipping the flag.
-        // This distinguishes "real cleanup after a session" from "StrictMode
-        // teardown before we ever got going". We only clear awareness in the
-        // first case — clearing it in the second case races with the next
-        // mount's connect() and wipes the cursor permanently.
         const wasReallyConnected = this.channelReady
-
         this.destroyed = true
 
+        // Capture a final snapshot before tearing down, in case the user
+        // navigated away mid-edit between debounced writes.
         let pendingSnapshot: Uint8Array | null = null
         try {
             pendingSnapshot = Y.encodeStateAsUpdate(this.doc)
         } catch {
-            // Ignore — periodic snapshot saves would have captured anything
-            // important up to a few seconds before this.
+            // Periodic snapshots will have captured anything important.
         }
 
         if (this.snapshotTimer !== null) {
@@ -140,9 +151,6 @@ export class SupabaseYjsProvider {
         this.doc.off('update', this.onDocUpdate)
         this.awareness.off('update', this.onAwarenessUpdate)
 
-        // Only signal "I've left" if we ever truly joined. Otherwise we'd
-        // be racing with the next provider's setLocalStateField in the
-        // StrictMode remount and leaving local awareness null permanently.
         if (wasReallyConnected) {
             try {
                 this.awareness.setLocalState(null)
@@ -161,14 +169,22 @@ export class SupabaseYjsProvider {
         }
     }
 
+    private snapshotMatch(): Record<string, string> {
+        if (this.snapshotTable === 'note_documents') {
+            return {project_id: this.projectId, note_id: this.docKey}
+        }
+        return {project_id: this.projectId}
+    }
+
     private async fetchSnapshot() {
         if (this.destroyed) return
-        const {data, error} = await this.client
-            .from('note_documents')
-            .select('state_b64')
-            .eq('project_id', this.projectId)
-            .eq('note_id', this.noteId)
-            .maybeSingle()
+        const match = this.snapshotMatch()
+
+        let query = this.client.from(this.snapshotTable).select('state_b64')
+        for (const [k, v] of Object.entries(match)) {
+            query = query.eq(k, v)
+        }
+        const {data, error} = await query.maybeSingle()
 
         if (error || !data || !data.state_b64) return
 
@@ -181,24 +197,29 @@ export class SupabaseYjsProvider {
     }
 
     private subscribeToChannel() {
-        const channelName = `note:${this.projectId}:${this.noteId}`
+        const channelName = `${this.channelPrefix}:${this.projectId}:${this.docKey}`
 
         this.channel = this.client.channel(channelName, {
-            config: {
-                broadcast: {
-                    self: false,
-                },
-            },
+            config: {broadcast: {self: false}},
         })
 
         this.channel
             .on('broadcast', {event: EVENT_DOC_UPDATE}, (msg) => {
                 if (this.destroyed) return
-                const payload = msg.payload as {update: string}
+
+                // Payload carries the binary update plus the sender's
+                // display name, which we forward to onRemoteUpdate so
+                // callers can surface "Updated by X" badges.
+                const payload = msg.payload as {update: string; by?: string}
                 if (typeof payload?.update !== 'string') return
+
                 try {
                     const update = base64ToUint8(payload.update)
                     Y.applyUpdate(this.doc, update, this.remoteOrigin)
+
+                    if (payload.by) {
+                        this.onRemoteUpdateCallback?.(payload.by)
+                    }
                 } catch {
                     // ignore
                 }
@@ -221,7 +242,7 @@ export class SupabaseYjsProvider {
                     await this.channel.send({
                         type: 'broadcast',
                         event: EVENT_DOC_UPDATE,
-                        payload: {update: uint8ToBase64(state)},
+                        payload: {update: uint8ToBase64(state), by: this.user.name},
                     })
                     const awarenessUpdate = encodeAwarenessUpdate(
                         this.awareness,
@@ -258,8 +279,17 @@ export class SupabaseYjsProvider {
 
                     this.synced = true
                     this.onSyncCallback?.()
+                    this.onStatusChangeCallback?.('connected')
                 } else {
                     this.channelReady = false
+
+                    if (
+                        status === 'CHANNEL_ERROR' ||
+                        status === 'TIMED_OUT' ||
+                        status === 'CLOSED'
+                    ) {
+                        this.onStatusChangeCallback?.('offline')
+                    }
                 }
             })
     }
@@ -271,10 +301,11 @@ export class SupabaseYjsProvider {
             return
         }
 
+        // Include sender's display name so recipients can attribute the edit.
         void this.channel.send({
             type: 'broadcast',
             event: EVENT_DOC_UPDATE,
-            payload: {update: uint8ToBase64(update)},
+            payload: {update: uint8ToBase64(update), by: this.user.name},
         })
 
         this.scheduleSnapshotSave()
@@ -314,14 +345,18 @@ export class SupabaseYjsProvider {
 
     private async uploadSnapshot(state: Uint8Array) {
         const stateB64 = uint8ToBase64(state)
+        const row = {
+            ...this.snapshotMatch(),
+            state_b64: stateB64,
+            updated_at: new Date().toISOString(),
+            updated_by: this.user.name,
+        }
+        const onConflict = this.snapshotTable === 'note_documents'
+            ? 'project_id,note_id'
+            : 'project_id'
+
         await this.client
-            .from('note_documents')
-            .upsert({
-                project_id: this.projectId,
-                note_id: this.noteId,
-                state_b64: stateB64,
-                updated_at: new Date().toISOString(),
-                updated_by: this.user.name,
-            }, {onConflict: 'project_id,note_id'})
+            .from(this.snapshotTable)
+            .upsert(row, {onConflict})
     }
 }

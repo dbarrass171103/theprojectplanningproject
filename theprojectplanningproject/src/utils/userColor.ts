@@ -1,6 +1,5 @@
-﻿// Stable, name-derived colours so each user gets a recognisable cursor.
-// Same name → same colour. Picked from a hand-tuned palette that's readable
-// on white backgrounds and distinct from each other.
+﻿// Deterministic user-colour assignment. Same name always maps to the same
+// palette index.
 
 const PALETTE = [
     '#e11d48', // rose-600
@@ -15,8 +14,6 @@ const PALETTE = [
     '#0d9488', // teal-600
 ]
 
-// Simple deterministic hash: not cryptographically meaningful, just a way
-// to derive a stable index from a name string.
 function hashString(s: string): number {
     let h = 0
     for (let i = 0; i < s.length; i++) {

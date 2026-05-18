@@ -1,16 +1,20 @@
-﻿import {create} from 'zustand'
+﻿// Sync status for the project's active connection.
+// Written by BoardProvider (via useSyncedYDoc / SupabaseYjsProvider), read
+// by SyncIndicator. Since notes metadata now lives in the board Y.Doc, a
+// single connection status covers both the board and the notes list.
+
+import {create} from 'zustand'
 
 export type SyncConnectionStatus =
-    | 'idle'           // no project active
-    | 'connecting'     // initial fetch / subscription setup
+    | 'idle'           // no project active / provider not yet started
+    | 'connecting'     // initial setup
     | 'connected'      // healthy
     | 'offline'        // network/socket down
     | 'access-revoked' // token rejected by RLS
 
 export interface RemoteUpdate {
-    by: string          // display name from the remote client
-    key: 'kanban' | 'notes'
-    at: number          // local timestamp when we received it
+    by: string
+    at: number
 }
 
 interface SyncStatusStore {

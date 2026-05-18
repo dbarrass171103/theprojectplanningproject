@@ -1,7 +1,5 @@
-﻿// Inline form for adding a new kanban column to the board.
-//
-// Sits at the right edge of the column list. Collapsed it's a faded
-// "+ Add column" button; clicked it expands to a small input + Add/Cancel.
+﻿// Inline form for adding a new column. Collapsed shows a "+ Add column"
+// button; expanded shows a title input plus Add/Cancel.
 
 import {useState} from "react";
 import {useKanbanStore} from "../../store/kanbanStore";
@@ -24,7 +22,6 @@ export default function AddColumnButton() {
         if (e.key === 'Escape') setIsOpen(false)
     }
 
-    // Collapsed state.
     if (!isOpen) {
         return (
             <button
@@ -36,7 +33,6 @@ export default function AddColumnButton() {
         )
     }
 
-    // Expanded form.
     return (
         <div className="bg-gray-100 rounded-xl p-3 w-72 shrink-0 flex flex-col gap-2">
             <input

@@ -1,197 +1,180 @@
-﻿import {create} from 'zustand'
-import type {Board, Card, Column} from "../types/kanban";
+﻿// Kanban store, a view layer over the project's board Y.Doc.
+//
+// The Y.Doc itself is owned by BoardProvider. On connect, BoardProvider
+// calls bindToDoc() to wire the store to the live Y.Doc:
+//   - Reads: the store mirrors the Y.Doc into a plain `board` object that
+//     React reads via selectors. The mirror regenerates on every 'update'.
+//   - Writes: mutation actions call boardYdoc helpers that run Y.Doc
+//     transactions.
+//   - Doc access: getBoardDoc() exposes the underlying Y.Doc to components
+//     that need it directly (e.g. CardDescriptionEditor wiring up
+//     CollaborationCaret awareness).
+
+import {create} from 'zustand'
+import * as Y from 'yjs'
+import type {Schema} from 'prosemirror-model'
+import type {Board} from '../types/kanban'
+import {
+    snapshotBoard,
+    addColumn as ydocAddColumn,
+    deleteColumn as ydocDeleteColumn,
+    addCard as ydocAddCard,
+    addCardWithDescriptionJSON,
+    deleteCard as ydocDeleteCard,
+    moveCard as ydocMoveCard,
+    renameColumn as ydocRenameColumn,
+    renameCard as ydocRenameCard,
+    getCardDescriptionById,
+} from '../utils/boardYdoc'
 
 interface KanbanStore {
     activeProjectId: string | null
     board: Board
 
-    loadForProject: (projectId: string) => void
-    clearActiveProject: () => void
+    bindToDoc: (projectId: string, doc: Y.Doc) => void
+    unbind: () => void
 
     addColumn: (title: string) => void
     deleteColumn: (columnId: string) => void
-    addCard: (columnId: string, title: string, description?: unknown) => void
+
+    addCard: (columnId: string, title: string) => void
+    addCardWithDescription: (
+        columnId: string,
+        title: string,
+        descriptionJson: unknown | null,
+    ) => void
+
     deleteCard: (columnId: string, cardId: string) => void
     moveCard: (fromColumnId: string, toColumnId: string, cardId: string, toIndex: number) => void
-    updateCard: (cardId: string, updates: Partial<Card>) => void
-    updateCardDescription: (cardId: string, description: unknown) => void
+    renameColumn: (columnId: string, title: string) => void
+    updateCard: (cardId: string, updates: {title?: string}) => void
+
+    getCardDescriptionFragment: (cardId: string) => Y.XmlFragment | null
+    getBoardDoc: () => Y.Doc | null
+
+    setProseSchema: (schema: Schema) => void
 }
 
 const EMPTY_BOARD: Board = {columns: [], cards: {}}
 
-const DEFAULT_BOARD: Board = {
-    columns: [
-        {id: "col-1", title: "To Do", cardIds: []},
-        {id: "col-2", title: "In Progress", cardIds: []},
-        {id: "col-3", title: "Done", cardIds: []}
-    ],
-    cards: {}
+// Held outside Zustand state to avoid spurious re-renders when the doc rebinds.
+let currentDoc: Y.Doc | null = null
+let observerCleanup: (() => void) | null = null
+let proseSchema: Schema | null = null
+
+function generateId(prefix: string): string {
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-function storageKey(projectId: string): string {
-    return `kanban-board:${projectId}`
-}
-
-function loadBoard(projectId: string): Board {
-    try {
-        const saved = localStorage.getItem(storageKey(projectId))
-        return saved ? JSON.parse(saved) : DEFAULT_BOARD
-    } catch {
-        return DEFAULT_BOARD
-    }
-}
-
-// Debounced save — avoids writing to localStorage on every drag event
-// (which fires many times per second). Writes happen at most once per 300ms.
-let saveTimer: number | null = null
-function saveBoard(projectId: string, board: Board) {
-    if (saveTimer !== null) window.clearTimeout(saveTimer)
-    saveTimer = window.setTimeout(() => {
-        saveTimer = null
-        try {
-            localStorage.setItem(storageKey(projectId), JSON.stringify(board))
-        } catch (e) {
-            console.warn('Failed to save board to localStorage', e)
-        }
-    }, 300)
-}
-
-function generateId(): string {
-    return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-}
-
-function withActiveProject<T>(
-    state: KanbanStore,
-    fn: (projectId: string) => T,
-): T | null {
-    if (!state.activeProjectId) {
-        console.warn('Kanban action called with no active project; ignoring')
+function requireDoc(): Y.Doc | null {
+    if (!currentDoc) {
+        console.warn('Kanban action called before board doc was bound; ignoring')
         return null
     }
-    return fn(state.activeProjectId)
+    return currentDoc
 }
 
 export const useKanbanStore = create<KanbanStore>((set) => ({
     activeProjectId: null,
     board: EMPTY_BOARD,
 
-    loadForProject: (projectId) => set(() => {
-        const board = loadBoard(projectId)
-        return {activeProjectId: projectId, board}
-    }),
+    bindToDoc: (projectId, doc) => {
+        if (observerCleanup) {
+            observerCleanup()
+            observerCleanup = null
+        }
+        currentDoc = doc
 
-    clearActiveProject: () => set(() => ({activeProjectId: null, board: EMPTY_BOARD})),
+        set({activeProjectId: projectId, board: snapshotBoard(doc)})
 
-    addColumn: title => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const newColumn: Column = {id: generateId(), title, cardIds: []}
-            const board = {...state.board, columns: [...state.board.columns, newColumn]}
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+        const onUpdate = () => {
+            set({board: snapshotBoard(doc)})
+        }
+        doc.on('update', onUpdate)
+        observerCleanup = () => doc.off('update', onUpdate)
+    },
 
-    deleteColumn: (columnId) => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const column = state.board.columns.find(c => c.id === columnId)
-            if (!column) return state
-            const cards = {...state.board.cards}
-            column.cardIds.forEach(id => delete cards[id])
-            const board = {
-                columns: state.board.columns.filter(c => c.id !== columnId),
-                cards
-            }
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+    unbind: () => {
+        if (observerCleanup) {
+            observerCleanup()
+            observerCleanup = null
+        }
+        currentDoc = null
+        proseSchema = null
+        set({activeProjectId: null, board: EMPTY_BOARD})
+    },
 
-    addCard: (columnId, title, description) => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const card: Card = {id: generateId(), title, description, createdAt: Date.now()}
-            const columns = state.board.columns.map(col =>
-                col.id === columnId ? {...col, cardIds: [...col.cardIds, card.id]} : col)
-            const board = {columns, cards: {...state.board.cards, [card.id]: card}}
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+    addColumn: (title) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocAddColumn(doc, generateId('col'), title)
+    },
 
-    deleteCard: (columnId, cardId) => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const columns = state.board.columns.map(col =>
-                col.id === columnId
-                    ? {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
-                    : col)
-            const cards = {...state.board.cards}
-            delete cards[cardId]
-            const board = {columns, cards}
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+    deleteColumn: (columnId) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocDeleteColumn(doc, columnId)
+    },
 
-    moveCard: (fromColumnId, toColumnId, cardId, toIndex) => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const fromColumn = state.board.columns.find(c => c.id === fromColumnId)
-            const toColumn = state.board.columns.find(c => c.id === toColumnId)
-            if (!fromColumn || !toColumn) return state
+    addCard: (columnId, title) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocAddCard(doc, columnId, generateId('card'), title)
+    },
 
-            const fromIndex = fromColumn.cardIds.indexOf(cardId)
-            if (fromIndex === -1) return state
+    addCardWithDescription: (columnId, title, descriptionJson) => {
+        const doc = requireDoc()
+        if (!doc) return
 
-            let normalisedIndex = toIndex
-            if (fromColumnId === toColumnId && toIndex > fromIndex) {
-                normalisedIndex = toIndex - 1
-            }
+        if (!descriptionJson || !proseSchema) {
+            ydocAddCard(doc, columnId, generateId('card'), title)
+            return
+        }
 
-            const columns = state.board.columns.map(col => {
-                if (col.id === fromColumnId && col.id !== toColumnId) {
-                    return {...col, cardIds: col.cardIds.filter(id => id !== cardId)}
-                }
-                if (col.id === toColumnId) {
-                    const ids = col.id === fromColumnId
-                        ? col.cardIds.filter(id => id !== cardId)
-                        : [...col.cardIds]
-                    const clamped = Math.max(0, Math.min(normalisedIndex, ids.length))
-                    ids.splice(clamped, 0, cardId)
-                    return {...col, cardIds: ids}
-                }
-                return col
-            })
-            const board = {...state.board, columns}
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+        addCardWithDescriptionJSON(
+            doc,
+            columnId,
+            generateId('card'),
+            title,
+            descriptionJson,
+            proseSchema,
+        )
+    },
 
-    updateCard: (cardId, updates) => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const board = {
-                ...state.board,
-                cards: {
-                    ...state.board.cards,
-                    [cardId]: {...state.board.cards[cardId], ...updates}
-                }
-            }
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+    deleteCard: (columnId, cardId) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocDeleteCard(doc, columnId, cardId)
+    },
 
-    updateCardDescription: (cardId, description) => set((state) => {
-        return withActiveProject(state, (projectId) => {
-            const existing = state.board.cards[cardId]
-            if (!existing) return state
-            const board = {
-                ...state.board,
-                cards: {
-                    ...state.board.cards,
-                    [cardId]: {...existing, description}
-                }
-            }
-            saveBoard(projectId, board)
-            return {board}
-        }) ?? state
-    }),
+    moveCard: (fromColumnId, toColumnId, cardId, toIndex) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocMoveCard(doc, fromColumnId, toColumnId, cardId, toIndex)
+    },
+
+    renameColumn: (columnId, title) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocRenameColumn(doc, columnId, title)
+    },
+
+    updateCard: (cardId, updates) => {
+        const doc = requireDoc()
+        if (!doc) return
+        if (updates.title !== undefined) {
+            ydocRenameCard(doc, cardId, updates.title)
+        }
+    },
+
+    getCardDescriptionFragment: (cardId) => {
+        if (!currentDoc) return null
+        return getCardDescriptionById(currentDoc, cardId)
+    },
+
+    getBoardDoc: () => currentDoc,
+
+    setProseSchema: (schema) => {
+        proseSchema = schema
+    },
 }))

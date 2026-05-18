@@ -1,6 +1,8 @@
-﻿import {useMemo, useState, useEffect} from 'react'
+﻿// Cards-that-mention-this-note panel, shown at the bottom of NoteEditor.
+
+import {useMemo, useState, useEffect} from 'react'
 import {useKanbanStore} from '../../store/kanbanStore'
-import {extractMentionedNoteIds} from '../../utils/Kanbancontent'
+import {extractMentionedNoteIds} from "../../utils/kanbanContent.ts";
 
 interface NoteBacklinksProps {
     noteId: string
@@ -16,10 +18,8 @@ export default function NoteBacklinks({noteId}: NoteBacklinksProps) {
     const board = useKanbanStore(s => s.board)
 
     const [isOpen, setIsOpen] = useState(false)
-    // Whether the scroll container is at (or near) the bottom.
     const [atBottom, setAtBottom] = useState(false)
 
-    // Compute backlinks by scanning all cards for @mentions of this note.
     const backlinks = useMemo<BacklinkEntry[]>(() => {
         const result: BacklinkEntry[] = []
 
@@ -42,40 +42,33 @@ export default function NoteBacklinks({noteId}: NoteBacklinksProps) {
         return result
     }, [board, noteId])
 
-    // All hooks must be called before any conditional return.
-    // This effect detects when the user is near the bottom of the notes
-    // scroll container so we can show the floating button.
+    // Detect when the notes container is near the bottom. Re-typed as
+    // HTMLElement after the null guard so the closure doesn't see it as
+    // possibly null.
     useEffect(() => {
-        const container = document.getElementById('notes-scroll-container')
-        if (!container) return
+        const el: HTMLElement | null = document.getElementById('notes-scroll-container')
+        if (!el) return
+
+        const container: HTMLElement = el
 
         function handleScroll() {
-            if (!container) return
             const nearBottom =
                 container.scrollTop + container.clientHeight >= container.scrollHeight - 20
             setAtBottom(nearBottom)
         }
 
-        // Run once on mount so the button appears immediately if the note is
-        // short enough that the container never scrolls.
         handleScroll()
-
         container.addEventListener('scroll', handleScroll)
         return () => container.removeEventListener('scroll', handleScroll)
     }, [])
 
-    // Close the list whenever the note changes.
-    useEffect(() => {
-        setIsOpen(false)
-    }, [noteId])
+    // No need to reset isOpen on note change: NoteEditor is keyed by
+    // note.id in NotesPage, so this component remounts on switch.
 
     if (backlinks.length === 0) return null
 
     return (
         <div className="relative">
-            {/* Show button when at the bottom OR when the list is already open.
-                Previously the button only appeared when scrolled to the bottom,
-                which meant it was permanently hidden on short notes. */}
             {(atBottom || isOpen) && (
                 <button
                     type="button"

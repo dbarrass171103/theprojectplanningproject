@@ -237,8 +237,7 @@
     animation: card-flash 2s ease-in-out;
 }
 
-/* APPEND THESE RULES TO YOUR EXISTING editor.css FILE.
-   They handle the visual rendering of remote users' cursors and selections. */
+/* Remote user cursors and selections (CollaborationCaret). */
 
 /* Each remote user's caret. The colour comes from `user.color` in the
    awareness state, applied via inline style by the Tiptap extension. */

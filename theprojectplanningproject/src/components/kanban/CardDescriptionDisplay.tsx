@@ -1,120 +1,119 @@
-﻿import {useMemo} from 'react'
+﻿// Read-only Tiptap editor for displaying a card's description.
+//
+// A read-only Tiptap instance with the same extension list as the editor
+// means every mark and node type the editor can produce is rendered here
+// too — including any extensions added in the future. The previous
+// hand-rolled JSON walker silently dropped any formatting it didn't know
+// about (strikethrough, underline, highlight, etc.).
+
+import {useEffect} from 'react'
+import {useEditor, EditorContent, type JSONContent} from '@tiptap/react'
+import {createCardDescriptionExtensions} from '../../tiptap/cardDescriptionExtensions'
 import {useNavigate, useParams} from 'react-router-dom'
 import {useNotesStore} from '../../store/notesStore'
 
 interface CardDescriptionDisplayProps {
-    doc: unknown
+    doc: JSONContent
 }
 
 export default function CardDescriptionDisplay({doc}: CardDescriptionDisplayProps) {
     const notes = useNotesStore(s => s.notes)
     const navigate = useNavigate()
-    // Read projectId from the URL so we can build the correct notes path.
-    const {projectId} = useParams<{projectId: string}>()
+    const {projectId} = useParams<{ projectId: string }>()
 
-    const rendered = useMemo(() => {
-        if (!doc || typeof doc !== 'object') return null
-        return renderNode(doc as TiptapNode, notes, navigate, projectId ?? '', 'root')
-    }, [doc, notes, navigate, projectId])
+    const editor = useEditor({
+        editable: false,
 
-    if (!rendered) return null
+        // Mirror CardDescriptionEditor's extension list (minus Collaboration
+        // and Placeholder, which are editor-only concerns). NoteMention
+        // without .configure() uses the default suggestion (items: () => [])
+        // which is inert in a non-editable editor.
+        extensions: createCardDescriptionExtensions({mentionSuggestion: false}),
 
-    return (
-        <div className="text-xs text-gray-500 leading-snug break-words">
-            {rendered}
-        </div>
-    )
-}
+        content: (doc as JSONContent) ?? null,
 
-interface TiptapNode {
-    type?: string
-    text?: string
-    attrs?: Record<string, unknown>
-    content?: TiptapNode[]
-    marks?: {type: string}[]
-}
+        editorProps: {
+            attributes: {
+                class: 'card-description-display focus:outline-none',
+            },
+        },
+    })
 
-function renderNode(
-    node: TiptapNode,
-    notes: ReturnType<typeof useNotesStore.getState>['notes'],
-    navigate: ReturnType<typeof useNavigate>,
-    projectId: string,
-    keyPrefix: string,
-): React.ReactNode {
+    // Push description updates (from remote collaborators) into the editor.
+    // emitUpdate: false applies the new content without firing an 'update'
+    // event, avoiding any potential feedback loop.
+    useEffect(() => {
+        if (!editor || editor.isDestroyed || !doc) return
+        editor.commands.setContent(doc as JSONContent, {emitUpdate: false})
+    }, [editor, doc])
 
-    if (node.type === 'text') {
-        let element: React.ReactNode = node.text
+    // Keep @note chips visually in sync with the live notes store. Reads
+    // state imperatively inside the callback so the closure is never stale.
+    useEffect(() => {
+        if (!editor) return
 
-        for (const mark of node.marks ?? []) {
-            if (mark.type === 'bold') {
-                element = <strong key={`${keyPrefix}-b`}>{element}</strong>
-            } else if (mark.type === 'italic') {
-                element = <em key={`${keyPrefix}-i`}>{element}</em>
-            } else if (mark.type === 'code') {
-                element = <code key={`${keyPrefix}-c`}>{element}</code>
-            }
+        function applyChipState() {
+            if (editor.isDestroyed) return
+            const currentNotes = useNotesStore.getState().notes
+
+            editor.view.dom
+                .querySelectorAll<HTMLElement>('[data-note-mention]')
+                .forEach(chip => {
+                    const noteId = chip.getAttribute('data-note-id')
+                    const note = noteId ? currentNotes[noteId] : undefined
+                    const isStale = !note
+
+                    chip.classList.toggle('stale', isStale)
+                    chip.setAttribute('aria-disabled', String(isStale))
+                    chip.setAttribute(
+                        'title',
+                        isStale
+                            ? 'This note has been deleted'
+                            : `Open ${note!.title || 'Untitled'}`,
+                    )
+                })
         }
 
-        return element
-    }
+        applyChipState()
+        editor.on('update', applyChipState)
+        const unsubNotes = useNotesStore.subscribe(applyChipState)
 
-    if (node.type === 'noteMention') {
-        const id = node.attrs?.id as string | undefined
-        const fallbackLabel = (node.attrs?.label as string | undefined) ?? 'note'
+        return () => {
+            editor.off('update', applyChipState)
+            unsubNotes()
+        }
+    }, [editor])
 
-        const liveNote = id ? notes[id] : undefined
-        const isStale = !liveNote
-
-        const label = liveNote?.title || fallbackLabel || 'Untitled'
-
-        return (
-            <button
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
+    return (
+        <div
+            className="text-xs text-gray-500 leading-snug break-words"
+            onPointerDown={(e) => {
+                // Stop dnd-kit stealing the pointer when a mention chip
+                // is pressed.
+                if ((e.target as HTMLElement).closest('[data-note-mention]')) {
                     e.stopPropagation()
-                    if (id && liveNote) {
-                        useNotesStore.getState().selectNote(id)
-                        // Fixed: navigate to the project-scoped notes route
-                        // instead of the bare '/notes' path which doesn't exist.
-                        navigate(`/p/${projectId}/notes`)
-                    }
-                }}
-                disabled={isStale}
-                className={`
-                    inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium
-                    ${isStale
-                        ? 'bg-gray-100 text-gray-400 line-through cursor-not-allowed'
-                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer'
-                    }
-                `}
-                title={isStale ? 'This note has been deleted' : `Open ${label}`}
-            >
-                @{label}
-            </button>
-        )
-    }
+                }
+            }}
+            onClick={(e) => {
+                // Event delegation: handle chip clicks anywhere in the
+                // description without per-node React handlers.
+                const chip = (e.target as HTMLElement)
+                    .closest('[data-note-mention]') as HTMLElement | null
+                if (!chip) return
 
-    const children = (node.content ?? []).map((child, i) =>
-        renderNode(child, notes, navigate, projectId, `${keyPrefix}-${i}`)
+                e.stopPropagation()
+
+                const noteId = chip.getAttribute('data-note-id')
+                if (!noteId) return
+
+                const note = notes[noteId]
+                if (!note) return // stale chip — click is a no-op
+
+                useNotesStore.getState().selectNote(noteId)
+                navigate(`/p/${projectId}/notes`)
+            }}
+        >
+            <EditorContent editor={editor}/>
+        </div>
     )
-
-    if (node.type === 'paragraph') {
-        if (children.length === 0) return null
-        return <p key={keyPrefix}>{children}</p>
-    }
-
-    if (node.type === 'bulletList') {
-        return <ul key={keyPrefix} className="list-disc pl-4">{children}</ul>
-    }
-
-    if (node.type === 'orderedList') {
-        return <ol key={keyPrefix} className="list-decimal pl-4">{children}</ol>
-    }
-
-    if (node.type === 'listItem') {
-        return <li key={keyPrefix}>{children}</li>
-    }
-
-    return <span key={keyPrefix}>{children}</span>
 }
