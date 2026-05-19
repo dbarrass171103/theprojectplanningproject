@@ -1,31 +1,4 @@
-﻿// Chat store for a project's message history.
-//
-// On bindToProject:
-//   1. Fetches the most recent PAGE_SIZE messages as initial history.
-//   2. Sets hasMore=true if exactly PAGE_SIZE rows came back, indicating
-//      older pages exist.
-//   3. Subscribes to a Supabase broadcast channel for live delivery.
-//
-// On loadOlderMessages:
-//   Fetches the next page using the oldest loaded message's createdAt as
-//   a cursor (lt filter), then prepends the results. Sets hasMore=false
-//   when fewer than PAGE_SIZE rows come back.
-//
-// On sendMessage:
-//   Inserts the row into Supabase (durable) and broadcasts it to peers
-//   so they don't have to wait for a refetch.
-
-// Optimistic sends: sendMessage immediately appends a message with
-// status='sending', then replaces it with the confirmed row on success
-// or marks it status='failed' on error. retryMessage re-attempts a failed
-// send by tempId.
-//
-// Typing indicators: setTyping broadcasts a 'typing' event on the chat
-// channel. Incoming typing events are stored in typingUsers keyed by
-// sender name with a timestamp; a cleanup interval expires entries older
-// than TYPING_TIMEOUT_MS so the indicator disappears automatically.
-
-import {create} from 'zustand'
+﻿import {create} from 'zustand'
 import type {RealtimeChannel} from '@supabase/supabase-js'
 import {getSupabaseForProject} from '../lib/supabase'
 import {colorForName} from '../utils/userColor'
@@ -34,7 +7,9 @@ import type {ChatMessage} from '../types/chat'
 const PAGE_SIZE = 50
 const BROADCAST_EVENT = 'chat-message'
 const TYPING_EVENT = 'typing'
-const TYPING_TIMEOUT_MS = 2000
+const EDIT_EVENT = 'chat-edit'
+const DELETE_EVENT = 'chat-delete'
+const TYPING_TIMEOUT_MS = 4000
 
 interface TypingUser {
     name: string
@@ -51,6 +26,11 @@ interface ChatStore {
     active: boolean
     typingUsers: TypingUser[]
 
+    /** Message currently being replied to. */
+    replyingTo: ChatMessage | null
+    /** Message currently being edited (by id). */
+    editingId: string | null
+
     bindToProject: (
         projectId: string,
         memberToken: string,
@@ -62,6 +42,10 @@ interface ChatStore {
     loadOlderMessages: () => Promise<void>
     sendMessage: (body: string) => Promise<void>
     retryMessage: (tempId: string) => Promise<void>
+    editMessage: (id: string, newBody: string) => Promise<void>
+    deleteMessage: (id: string) => Promise<void>
+    setReplyingTo: (msg: ChatMessage | null) => void
+    setEditingId: (id: string | null) => void
     setTyping: () => void
     markRead: () => void
     setActive: (active: boolean) => void
@@ -83,6 +67,12 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
         body: row.body as string,
         createdAt: new Date(row.created_at as string).getTime(),
         status: 'sent',
+        replyToId: (row.reply_to_id as string | undefined) ?? undefined,
+        replyToBody: (row.reply_to_body as string | undefined) ?? undefined,
+        replyToSender: (row.reply_to_sender as string | undefined) ?? undefined,
+        editedAt: row.edited_at
+            ? new Date(row.edited_at as string).getTime()
+            : undefined,
     }
 }
 
@@ -98,6 +88,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     unreadCount: 0,
     active: false,
     typingUsers: [],
+    replyingTo: null,
+    editingId: null,
 
     bindToProject: async (projectId, memberToken, adminToken, displayName) => {
         if (channel) {
@@ -121,6 +113,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             hasMore: false,
             unreadCount: 0,
             typingUsers: [],
+            replyingTo: null,
+            editingId: null,
         })
 
         const client = getSupabaseForProject(memberToken, adminToken)
@@ -149,7 +143,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             .on('broadcast', {event: BROADCAST_EVENT}, (msg) => {
                 const payload = msg.payload as ChatMessage | undefined
                 if (!payload) return
-
                 set(state => {
                     if (state.messages.some(m => m.id === payload.id)) return state
                     return {
@@ -160,10 +153,27 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                     }
                 })
             })
+            .on('broadcast', {event: EDIT_EVENT}, (msg) => {
+                const payload = msg.payload as {id: string; body: string; editedAt: number} | undefined
+                if (!payload) return
+                set(state => ({
+                    messages: state.messages.map(m =>
+                        m.id === payload.id
+                            ? {...m, body: payload.body, editedAt: payload.editedAt}
+                            : m,
+                    ),
+                }))
+            })
+            .on('broadcast', {event: DELETE_EVENT}, (msg) => {
+                const payload = msg.payload as {id: string} | undefined
+                if (!payload) return
+                set(state => ({
+                    messages: state.messages.filter(m => m.id !== payload.id),
+                }))
+            })
             .on('broadcast', {event: TYPING_EVENT}, (msg) => {
                 const payload = msg.payload as {name: string; color: string} | undefined
                 if (!payload?.name || payload.name === currentDisplayName) return
-
                 set(state => {
                     const existing = state.typingUsers.filter(u => u.name !== payload.name)
                     return {
@@ -176,13 +186,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             })
             .subscribe()
 
-        // Expire stale typing indicators every second.
         typingCleanupInterval = window.setInterval(() => {
             const now = Date.now()
             set(state => {
-                const fresh = state.typingUsers.filter(
-                    u => now - u.at < TYPING_TIMEOUT_MS,
-                )
+                const fresh = state.typingUsers.filter(u => now - u.at < TYPING_TIMEOUT_MS)
                 if (fresh.length === state.typingUsers.length) return state
                 return {typingUsers: fresh}
             })
@@ -213,6 +220,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             unreadCount: 0,
             active: false,
             typingUsers: [],
+            replyingTo: null,
+            editingId: null,
         })
     },
 
@@ -254,13 +263,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const trimmed = body.trim()
         if (!trimmed) return
 
-        const {activeProjectId} = get()
+        const {activeProjectId, replyingTo} = get()
         if (!activeProjectId || !currentMemberToken) return
 
         const tempId = generateTempId()
         const senderColor = colorForName(currentDisplayName)
 
-        // Append optimistically before the network round-trip.
         const optimistic: ChatMessage = {
             id: tempId,
             tempId,
@@ -270,11 +278,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             body: trimmed,
             createdAt: Date.now(),
             status: 'sending',
+            replyToId: replyingTo?.id,
+            replyToBody: replyingTo?.body,
+            replyToSender: replyingTo?.senderName,
         }
 
-        set(state => ({messages: [...state.messages, optimistic]}))
+        set(state => ({
+            messages: [...state.messages, optimistic],
+            replyingTo: null,
+        }))
 
-        await doSend(tempId, activeProjectId, trimmed, senderColor, set)
+        await doSend(tempId, activeProjectId, trimmed, senderColor, replyingTo, set)
     },
 
     retryMessage: async (tempId) => {
@@ -284,15 +298,84 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const msg = messages.find(m => m.tempId === tempId)
         if (!msg) return
 
-        // Reset to sending state before retrying.
         set(state => ({
             messages: state.messages.map(m =>
                 m.tempId === tempId ? {...m, status: 'sending' as const} : m,
             ),
         }))
 
-        await doSend(tempId, activeProjectId, msg.body, msg.senderColor, set)
+        const replyingTo = msg.replyToId
+            ? {
+                id: msg.replyToId,
+                body: msg.replyToBody ?? '',
+                senderName: msg.replyToSender ?? '',
+            } as ChatMessage
+            : null
+
+        await doSend(tempId, activeProjectId, msg.body, msg.senderColor, replyingTo, set)
     },
+
+    editMessage: async (id, newBody) => {
+        const trimmed = newBody.trim()
+        if (!trimmed) return
+
+        const editedAt = Date.now()
+
+        // Apply locally before the network confirms.
+        set(state => ({
+            messages: state.messages.map(m =>
+                m.id === id ? {...m, body: trimmed, editedAt} : m,
+            ),
+            editingId: null,
+        }))
+
+        const client = getSupabaseForProject(currentMemberToken!, currentAdminToken)
+
+        const {error} = await client
+            .from('chat_messages')
+            .update({body: trimmed, edited_at: new Date(editedAt).toISOString()})
+            .eq('id', id)
+
+        if (error) {
+            console.warn('Failed to edit message:', error)
+            return
+        }
+
+        await channel?.send({
+            type: 'broadcast',
+            event: EDIT_EVENT,
+            payload: {id, body: trimmed, editedAt},
+        })
+    },
+
+    deleteMessage: async (id) => {
+        // Remove locally before the network confirms.
+        set(state => ({
+            messages: state.messages.filter(m => m.id !== id),
+        }))
+
+        const client = getSupabaseForProject(currentMemberToken!, currentAdminToken)
+
+        const {error} = await client
+            .from('chat_messages')
+            .delete()
+            .eq('id', id)
+
+        if (error) {
+            console.warn('Failed to delete message:', error)
+            return
+        }
+
+        await channel?.send({
+            type: 'broadcast',
+            event: DELETE_EVENT,
+            payload: {id},
+        })
+    },
+
+    setReplyingTo: (msg) => set({replyingTo: msg, editingId: null}),
+
+    setEditingId: (id) => set({editingId: id, replyingTo: null}),
 
     setTyping: () => {
         if (!channel) return
@@ -314,13 +397,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     },
 }))
 
-// Extracted so both sendMessage and retryMessage can share the same
-// insert + broadcast logic without duplicating error handling.
 async function doSend(
     tempId: string,
     projectId: string,
     body: string,
     senderColor: string,
+    replyingTo: ChatMessage | null,
     set: (fn: (state: ChatStore) => Partial<ChatStore>) => void,
 ) {
     const client = getSupabaseForProject(currentMemberToken!, currentAdminToken)
@@ -332,6 +414,9 @@ async function doSend(
             sender_name: currentDisplayName,
             sender_color: senderColor,
             body,
+            reply_to_id: replyingTo?.id ?? null,
+            reply_to_body: replyingTo?.body ?? null,
+            reply_to_sender: replyingTo?.senderName ?? null,
         })
         .select()
         .single()
@@ -348,8 +433,6 @@ async function doSend(
 
     const confirmed = rowToMessage(data as Record<string, unknown>)
 
-    // Replace the optimistic entry with the confirmed one, preserving tempId
-    // so retryMessage can still find it if needed.
     set(state => ({
         messages: state.messages.map(m =>
             m.tempId === tempId ? {...confirmed, tempId} : m,

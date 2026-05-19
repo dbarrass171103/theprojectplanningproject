@@ -7,4 +7,9 @@
     body: string
     createdAt: number
     status: 'sending' | 'sent' | 'failed'
+    replyToId?: string
+    replyToBody?: string
+    replyToSender?: string
+    editedAt?: number
+    deleted?: boolean
 }

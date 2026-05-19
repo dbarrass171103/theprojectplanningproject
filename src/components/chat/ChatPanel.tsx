@@ -3,9 +3,104 @@
 import {useEffect, useRef, useState} from 'react'
 import {useChatStore} from '../../store/chatStore'
 import {useCurrentProject} from '../../store/projectsStore'
+import type {ChatMessage} from '../../types/chat'
 
 function formatTime(ts: number): string {
     return new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
+}
+
+function ReplyPreview({
+    replyToId,
+    replyToSender,
+    replyToBody,
+    isOwn,
+    onScrollTo,
+}: {
+    replyToId: string
+    replyToSender: string
+    replyToBody: string
+    isOwn: boolean
+    onScrollTo: (id: string) => void
+}) {
+    return (
+        <button
+            type="button"
+            onClick={() => onScrollTo(replyToId)}
+            className={`
+                w-full text-left mb-1.5 px-2 py-1 rounded-lg border-l-2 text-xs
+                transition-opacity hover:opacity-80
+                ${isOwn
+                    ? 'border-blue-300 bg-blue-400/30 text-blue-100'
+                    : 'border-gray-300 bg-gray-200/60 text-gray-500'
+                }
+            `}
+        >
+            <span className="font-semibold block truncate">{replyToSender}</span>
+            <span className="block truncate">{replyToBody}</span>
+        </button>
+    )
+}
+
+// Action buttons rendered inline above/below the bubble, aligned to the
+// same side, so they never overflow the panel edge.
+function MessageActions({
+    isOwn,
+    onReply,
+    onEdit,
+    onDelete,
+}: {
+    isOwn: boolean
+    onReply: () => void
+    onEdit?: () => void
+    onDelete?: () => void
+}) {
+    return (
+        <div className={`
+            flex items-center gap-1 mb-1
+            opacity-0 group-hover:opacity-100 transition-opacity
+            ${isOwn ? 'justify-end' : 'justify-start'}
+        `}>
+            <button
+                type="button"
+                onClick={onReply}
+                title="Reply"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs
+                           bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-700
+                           transition-colors border border-gray-200"
+            >
+                <span>↩</span>
+                <span>Reply</span>
+            </button>
+
+            {isOwn && onEdit && (
+                <button
+                    type="button"
+                    onClick={onEdit}
+                    title="Edit"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs
+                               bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-700
+                               transition-colors border border-gray-200"
+                >
+                    <span>✎</span>
+                    <span>Edit</span>
+                </button>
+            )}
+
+            {isOwn && onDelete && (
+                <button
+                    type="button"
+                    onClick={onDelete}
+                    title="Delete"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs
+                               bg-gray-100 hover:bg-red-50 text-gray-500 hover:text-red-500
+                               transition-colors border border-gray-200 hover:border-red-200"
+                >
+                    <span>✕</span>
+                    <span>Delete</span>
+                </button>
+            )}
+        </div>
+    )
 }
 
 export default function ChatPanel() {
@@ -14,8 +109,14 @@ export default function ChatPanel() {
     const hasMore = useChatStore(s => s.hasMore)
     const loadingOlder = useChatStore(s => s.loadingOlder)
     const typingUsers = useChatStore(s => s.typingUsers)
+    const replyingTo = useChatStore(s => s.replyingTo)
+    const editingId = useChatStore(s => s.editingId)
     const sendMessage = useChatStore(s => s.sendMessage)
     const retryMessage = useChatStore(s => s.retryMessage)
+    const editMessage = useChatStore(s => s.editMessage)
+    const deleteMessage = useChatStore(s => s.deleteMessage)
+    const setReplyingTo = useChatStore(s => s.setReplyingTo)
+    const setEditingId = useChatStore(s => s.setEditingId)
     const loadOlderMessages = useChatStore(s => s.loadOlderMessages)
     const setTyping = useChatStore(s => s.setTyping)
     const setActive = useChatStore(s => s.setActive)
@@ -29,22 +130,32 @@ export default function ChatPanel() {
     const isNearBottomRef = useRef(true)
     const prevMessageCountRef = useRef(messages.length)
     const scrollHeightBeforeLoadRef = useRef(0)
-
-    // Throttle typing broadcasts — at most one per 2s.
     const lastTypingSentRef = useRef(0)
+    const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+    const displayName = project?.displayName ?? ''
 
     useEffect(() => {
         setActive(true)
         return () => setActive(false)
     }, [setActive])
 
-    // Scroll to bottom on initial load only.
     useEffect(() => {
         bottomRef.current?.scrollIntoView()
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    // Handle scroll position after messages array changes.
+    useEffect(() => {
+        if (editingId) {
+            const msg = messages.find(m => m.id === editingId)
+            if (msg) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect
+                setInput(msg.body)
+                inputRef.current?.focus()
+            }
+        }
+    }, [editingId])
+
     useEffect(() => {
         const container = scrollRef.current
         if (!container) return
@@ -56,7 +167,6 @@ export default function ChatPanel() {
         if (newCount <= prevCount) return
 
         if (scrollHeightBeforeLoadRef.current > 0) {
-            // Older messages were prepended — restore the viewport position.
             const newScrollHeight = container.scrollHeight
             container.scrollTop += newScrollHeight - scrollHeightBeforeLoadRef.current
             scrollHeightBeforeLoadRef.current = 0
@@ -79,19 +189,30 @@ export default function ChatPanel() {
         }
     }
 
+    function scrollToMessage(id: string) {
+        const el = messageRefs.current[id]
+        if (!el) return
+        el.scrollIntoView({behavior: 'smooth', block: 'center'})
+        el.classList.add('ring-2', 'ring-blue-300', 'rounded-2xl')
+        window.setTimeout(() => {
+            el.classList.remove('ring-2', 'ring-blue-300', 'rounded-2xl')
+        }, 1500)
+    }
+
     async function handleSend() {
         const trimmed = input.trim()
         if (!trimmed || sending) return
 
         setSending(true)
         setInput('')
+        if (inputRef.current) inputRef.current.style.height = 'auto'
 
-        // Reset textarea height
-        if (inputRef.current) {
-            inputRef.current.style.height = 'auto'
+        if (editingId) {
+            await editMessage(editingId, trimmed)
+        } else {
+            await sendMessage(trimmed)
         }
 
-        await sendMessage(trimmed)
         setSending(false)
         inputRef.current?.focus()
     }
@@ -101,12 +222,13 @@ export default function ChatPanel() {
             e.preventDefault()
             handleSend()
         }
+        if (e.key === 'Escape') {
+            handleCancelCompose()
+        }
     }
 
     function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
         setInput(e.target.value)
-
-        // Broadcast typing indicator, throttled to once per 2s.
         const now = Date.now()
         if (now - lastTypingSentRef.current > 2000) {
             lastTypingSentRef.current = now
@@ -114,9 +236,19 @@ export default function ChatPanel() {
         }
     }
 
-    const displayName = project?.displayName ?? ''
+    function handleStartEdit(msg: ChatMessage) {
+        setEditingId(msg.id)
+        setInput(msg.body)
+        inputRef.current?.focus()
+    }
 
-    // Typing indicator label, excluding ourselves.
+    function handleCancelCompose() {
+        setEditingId(null)
+        setReplyingTo(null)
+        setInput('')
+        if (inputRef.current) inputRef.current.style.height = 'auto'
+    }
+
     const othersTyping = typingUsers.filter(u => u.name !== displayName)
     const typingLabel =
         othersTyping.length === 1
@@ -126,6 +258,8 @@ export default function ChatPanel() {
             : othersTyping.length > 2
             ? 'Several people are typing…'
             : null
+
+    const isEditing = editingId !== null
 
     return (
         <div className="flex flex-col h-[calc(100vh-57px)] max-w-2xl mx-auto">
@@ -160,9 +294,13 @@ export default function ChatPanel() {
                         return (
                             <div
                                 key={msg.id}
-                                className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} ${isGrouped ? 'mt-0.5' : 'mt-3'}`}
+                                ref={el => { messageRefs.current[msg.id] = el }}
+                                className={`
+                                    group flex flex-col
+                                    ${isOwn ? 'items-end' : 'items-start'}
+                                    ${isGrouped ? 'mt-0.5' : 'mt-3'}
+                                `}
                             >
-                                {/* Sender name + timestamp — only on first of a group */}
                                 {!isGrouped && (
                                     <div className={`flex items-baseline gap-2 mb-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
                                         <span
@@ -177,6 +315,16 @@ export default function ChatPanel() {
                                     </div>
                                 )}
 
+                                {/* Action buttons — inline above bubble, same alignment */}
+                                {msg.status === 'sent' && (
+                                    <MessageActions
+                                        isOwn={isOwn}
+                                        onReply={() => setReplyingTo(msg)}
+                                        onEdit={isOwn ? () => handleStartEdit(msg) : undefined}
+                                        onDelete={isOwn ? () => deleteMessage(msg.id) : undefined}
+                                    />
+                                )}
+
                                 {/* Bubble */}
                                 <div
                                     className={`
@@ -189,10 +337,25 @@ export default function ChatPanel() {
                                         ${msg.status === 'sending' ? 'opacity-60' : ''}
                                     `}
                                 >
+                                    {msg.replyToId && msg.replyToBody && msg.replyToSender && (
+                                        <ReplyPreview
+                                            replyToId={msg.replyToId}
+                                            replyToSender={msg.replyToSender}
+                                            replyToBody={msg.replyToBody}
+                                            isOwn={isOwn}
+                                            onScrollTo={scrollToMessage}
+                                        />
+                                    )}
+
                                     {msg.body}
+
+                                    {msg.editedAt && (
+                                        <span className={`text-[10px] ml-1.5 ${isOwn ? 'text-blue-200' : 'text-gray-400'}`}>
+                                            (edited)
+                                        </span>
+                                    )}
                                 </div>
 
-                                {/* Send status */}
                                 {isOwn && msg.status === 'sending' && (
                                     <span className="text-[10px] text-gray-400 mt-0.5">
                                         Sending…
@@ -200,9 +363,7 @@ export default function ChatPanel() {
                                 )}
                                 {isOwn && msg.status === 'failed' && (
                                     <div className="flex items-center gap-1.5 mt-0.5">
-                                        <span className="text-[10px] text-red-500">
-                                            Failed to send
-                                        </span>
+                                        <span className="text-[10px] text-red-500">Failed to send</span>
                                         <button
                                             onClick={() => msg.tempId && retryMessage(msg.tempId)}
                                             className="text-[10px] text-blue-500 hover:text-blue-700 underline"
@@ -218,12 +379,32 @@ export default function ChatPanel() {
                 <div ref={bottomRef}/>
             </div>
 
-            {/* Typing indicator */}
             <div className="px-4 h-5 flex items-center">
                 {typingLabel && (
                     <span className="text-xs text-gray-400 italic">{typingLabel}</span>
                 )}
             </div>
+
+            {(replyingTo || isEditing) && (
+                <div className="mx-4 mb-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-500 mb-0.5">
+                            {isEditing ? 'Editing message' : `Replying to ${replyingTo!.senderName}`}
+                        </p>
+                        {!isEditing && (
+                            <p className="text-xs text-gray-400 truncate">{replyingTo!.body}</p>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleCancelCompose}
+                        className="text-gray-400 hover:text-gray-700 text-sm shrink-0 leading-none"
+                        aria-label="Cancel"
+                    >
+                        ✕
+                    </button>
+                </div>
+            )}
 
             <div className="border-t border-gray-200 px-4 py-3 bg-white">
                 <div className="flex gap-2 items-end">
@@ -232,7 +413,7 @@ export default function ChatPanel() {
                         value={input}
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
-                        placeholder="Send a message…"
+                        placeholder={isEditing ? 'Edit message…' : 'Send a message…'}
                         rows={1}
                         className="
                             flex-1 resize-none text-sm rounded-lg border border-gray-300
@@ -251,11 +432,11 @@ export default function ChatPanel() {
                         disabled={!input.trim() || sending}
                         className="bg-blue-500 hover:bg-blue-600 disabled:opacity-40 text-white text-sm rounded-lg px-4 py-2 transition-colors shrink-0"
                     >
-                        Send
+                        {isEditing ? 'Save' : 'Send'}
                     </button>
                 </div>
                 <p className="text-xs text-gray-400 mt-1.5">
-                    Enter to send · Shift+Enter for new line
+                    Enter to {isEditing ? 'save' : 'send'} · Shift+Enter for new line · Esc to cancel
                 </p>
             </div>
         </div>
