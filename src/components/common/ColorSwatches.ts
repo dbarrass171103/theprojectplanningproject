@@ -28,3 +28,26 @@ export const HIGHLIGHT_SWATCHES = [
     {name: 'Lime',   value: '#d9f99d'},   // lime-200
     {name: 'Cyan',   value: '#a5f3fc'},   // cyan-200
 ]
+
+// Colour pairs for kanban columns. `cardColor` (-100) tints the card
+// background; `columnColor` (-200) tints the column background behind them.
+// null represents "no colour" (white cards, gray-100 column).
+export interface ColumnColorSwatch {
+    name: string
+    cardColor: string | null
+    columnColor: string | null
+}
+
+export const COLUMN_COLOR_SWATCHES: ColumnColorSwatch[] = [
+    {name: 'None',   cardColor: null,      columnColor: null},
+    {name: 'Red',    cardColor: '#fee2e2', columnColor: '#fecaca'},   // red-100   / red-200
+    {name: 'Orange', cardColor: '#ffedd5', columnColor: '#fed7aa'},   // orange-100 / orange-200
+    {name: 'Yellow', cardColor: '#fef9c3', columnColor: '#fef08a'},   // yellow-100 / yellow-200
+    {name: 'Green',  cardColor: '#dcfce7', columnColor: '#bbf7d0'},   // green-100  / green-200
+    {name: 'Teal',   cardColor: '#ccfbf1', columnColor: '#99f6e4'},   // teal-100   / teal-200
+    {name: 'Blue',   cardColor: '#dbeafe', columnColor: '#bfdbfe'},   // blue-100   / blue-200
+    {name: 'Indigo', cardColor: '#e0e7ff', columnColor: '#c7d2fe'},   // indigo-100 / indigo-200
+    {name: 'Purple', cardColor: '#f3e8ff', columnColor: '#e9d5ff'},   // purple-100 / purple-200
+    {name: 'Pink',   cardColor: '#fce7f3', columnColor: '#fbcfe8'},   // pink-100   / pink-200
+    {name: 'Gray',   cardColor: '#f3f4f6', columnColor: '#e5e7eb'},   // gray-100   / gray-200
+]

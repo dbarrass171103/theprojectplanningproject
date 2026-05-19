@@ -157,6 +157,31 @@ export function renameColumn(doc: Y.Doc, columnId: string, newTitle: string): vo
     })
 }
 
+/** Sets colour of kanban column */
+export function setColumnColor(
+    doc: Y.Doc,
+    columnId: string,
+    cardColor: string | null,
+    columnColor: string | null,
+): void {
+    doc.transact(() => {
+        const colMap = getColumnsMap(doc).get(columnId)
+        if (!colMap) return
+
+        if (cardColor === null) {
+            colMap.delete('color')
+        } else {
+            colMap.set('color', cardColor)
+        }
+
+        if (columnColor === null) {
+            colMap.delete('columnColor')
+        } else {
+            colMap.set('columnColor', columnColor)
+        }
+    })
+}
+
 // ---------------------------------------------------------
 // Mutations — Cards
 // ---------------------------------------------------------
@@ -302,6 +327,8 @@ export function snapshotBoard(doc: Y.Doc): Board {
             id: colId,
             title: (colMap.get('title') as Y.Text)?.toString() ?? '',
             cardIds: (colMap.get('cardIds') as Y.Array<string>)?.toArray() ?? [],
+            color: (colMap.get('color') as string | undefined) ?? undefined,
+            columnColor: (colMap.get('columnColor') as string | undefined) ?? undefined,
         })
     }
 

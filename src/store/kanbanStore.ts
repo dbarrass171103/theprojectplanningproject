@@ -24,6 +24,7 @@ import {
     moveCard as ydocMoveCard,
     renameColumn as ydocRenameColumn,
     renameCard as ydocRenameCard,
+    setColumnColor as ydocSetColumnColor,
     getCardDescriptionById,
 } from '../utils/boardYdoc'
 
@@ -47,6 +48,7 @@ interface KanbanStore {
     deleteCard: (columnId: string, cardId: string) => void
     moveCard: (fromColumnId: string, toColumnId: string, cardId: string, toIndex: number) => void
     renameColumn: (columnId: string, title: string) => void
+    setColumnColor: (columnId: string, cardColor: string | null, columnColor: string | null) => void
     updateCard: (cardId: string, updates: {title?: string}) => void
 
     getCardDescriptionFragment: (cardId: string) => Y.XmlFragment | null
@@ -157,6 +159,12 @@ export const useKanbanStore = create<KanbanStore>((set) => ({
         const doc = requireDoc()
         if (!doc) return
         ydocRenameColumn(doc, columnId, title)
+    },
+
+    setColumnColor: (columnId, cardColor, columnColor) => {
+        const doc = requireDoc()
+        if (!doc) return
+        ydocSetColumnColor(doc, columnId, cardColor, columnColor)
     },
 
     updateCard: (cardId, updates) => {

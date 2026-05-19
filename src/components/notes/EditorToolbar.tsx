@@ -3,7 +3,7 @@
 
 import {useEditorState, type Editor} from '@tiptap/react'
 import ColorPickerButton from './ColorPickerButton'
-import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from './ColorSwatches'
+import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from '../common/ColorSwatches.ts'
 
 interface ToolbarButtonProps {
     onClick: () => void

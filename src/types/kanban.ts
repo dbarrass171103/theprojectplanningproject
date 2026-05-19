@@ -11,6 +11,8 @@ export interface Column {
     id: string
     title: string
     cardIds: string[]
+    color?: string
+    columnColor?: string
 }
 
 export interface Board {

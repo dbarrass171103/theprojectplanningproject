@@ -63,6 +63,7 @@ export default function ProjectGuard() {
                 }))
             }
 
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setPhase({kind: 'ready'})
             return
         }

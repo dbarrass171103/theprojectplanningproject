@@ -14,9 +14,10 @@ import {useKanbanStore} from "../../store/kanbanStore"
 
 interface AddCardFormProps {
     columnId: string
+    columnColor?: string
 }
 
-export default function AddCardForm({columnId}: AddCardFormProps) {
+export default function AddCardForm({columnId, columnColor}: AddCardFormProps) {
     const addCardWithDescription = useKanbanStore(s => s.addCardWithDescription)
     const setProseSchema = useKanbanStore(s => s.setProseSchema)
 
@@ -27,7 +28,7 @@ export default function AddCardForm({columnId}: AddCardFormProps) {
         extensions: [
             ...createCardDescriptionExtensions(),
             Placeholder.configure({
-                placeholder: "Description (optional) — type @ to link a note",
+                placeholder: "Description...",
             }),
         ],
         content: '',
@@ -113,7 +114,10 @@ export default function AddCardForm({columnId}: AddCardFormProps) {
                 className="text-sm rounded-lg border border-gray-300 px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
 
-            <div className="rounded-lg border border-gray-300 px-3 py-2 bg-white focus-within:ring-2 focus-within:ring-blue-400">
+            <div
+                className="rounded-lg border border-gray-300 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-400"
+                style={{backgroundColor: columnColor ?? '#ffffff'}}
+            >
                 <EditorContent editor={editor}/>
             </div>
 

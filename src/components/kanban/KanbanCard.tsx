@@ -13,9 +13,10 @@ interface KanbanCardProps {
     card: Card
     columnId: string
     isFlashed?: boolean
+    columnColor?: string
 }
 
-export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps) {
+export default function KanbanCard({card, columnId, isFlashed, columnColor}: KanbanCardProps) {
     const deleteCard = useKanbanStore(state => state.deleteCard)
     const [isEditing, setIsEditing] = useState(false)
 
@@ -29,12 +30,12 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
     } = useSortable({id: card.id, disabled: isEditing})
 
     const elRef = useRef<HTMLDivElement | null>(null)
+
     function setRef(el: HTMLDivElement | null) {
         elRef.current = el
         setSortableRef(el)
     }
 
-    // Scroll into view when arriving via a mention flash.
     useEffect(() => {
         if (!isFlashed || !elRef.current) return
         elRef.current.scrollIntoView({
@@ -44,26 +45,24 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
         })
     }, [isFlashed])
 
-    const style = {transform: CSS.Transform.toString(transform), transition}
-
-    function startEditing() {
-        setIsEditing(true)
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        // Apply column colour as a subtle tint. A fixed low-opacity overlay
+        // on white keeps the card readable regardless of which colour is chosen.
+        backgroundColor: columnColor ?? '#ffffff',
     }
 
-    function closeEditor() {
-        setIsEditing(false)
-    }
+
 
     return (
         <div
             ref={setRef}
             style={style}
-            // Detach the drag handle while editing so clicks inside the
-            // editor don't start a drag.
             {...(isEditing ? {} : attributes)}
             {...(isEditing ? {} : listeners)}
             className={`
-                bg-white rounded-lg border border-gray-200 p-3
+                rounded-lg border border-gray-200 p-3
                 shadow-sm hover:shadow-md hover:border-gray-300
                 transition-all duration-150
                 ${isEditing ? '' : 'cursor-grab'}
@@ -79,7 +78,7 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
                 <div className="flex items-center gap-1 shrink-0">
                     <button
                         onPointerDown={e => e.stopPropagation()}
-                        onClick={() => isEditing ? closeEditor() : startEditing()}
+                        onClick={() => isEditing ? setIsEditing(false) : setIsEditing(true)}
                         className="text-gray-300 hover:text-blue-500 transition-colors text-sm leading-none"
                         aria-label={isEditing ? "Close editor" : "Edit description"}
                         title={isEditing ? "Done" : "Edit description"}
@@ -100,11 +99,11 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
 
             {isEditing ? (
                 <div className="mt-2 flex flex-col gap-2">
-                    <div className="border border-gray-200 rounded p-2 bg-gray-50">
+                    <div className="border border-gray-200 rounded p-2 bg-white/60">
                         <CardDescriptionEditor
                             cardId={card.id}
-                            onSubmit={closeEditor}
-                            onCancel={closeEditor}
+                            onSubmit={() => setIsEditing(false)}
+                            onCancel={() => setIsEditing(false)}
                             autoFocus
                         />
                     </div>
@@ -115,7 +114,7 @@ export default function KanbanCard({card, columnId, isFlashed}: KanbanCardProps)
                         </span>
 
                         <button
-                            onClick={closeEditor}
+                            onClick={() => setIsEditing(false)}
                             className="bg-blue-500 hover:bg-blue-600 text-white text-xs rounded px-2 py-1 transition-colors"
                         >
                             Done
