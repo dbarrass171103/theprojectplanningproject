@@ -1,4 +1,4 @@
-﻿// Chat panel, message history and input for the project chat.
+﻿// Chat panel — message history and input for the project chat.
 
 import {useEffect, useRef, useState} from 'react'
 import {useChatStore} from '../../store/chatStore'
@@ -9,13 +9,27 @@ function formatTime(ts: number): string {
 
 export default function ChatPanel() {
     const messages = useChatStore(s => s.messages)
+    const hasMore = useChatStore(s => s.hasMore)
+    const loadingOlder = useChatStore(s => s.loadingOlder)
     const sendMessage = useChatStore(s => s.sendMessage)
+    const loadOlderMessages = useChatStore(s => s.loadOlderMessages)
     const setActive = useChatStore(s => s.setActive)
 
     const [input, setInput] = useState('')
     const [sending, setSending] = useState(false)
+
+    const scrollRef = useRef<HTMLDivElement | null>(null)
     const bottomRef = useRef<HTMLDivElement | null>(null)
     const inputRef = useRef<HTMLTextAreaElement | null>(null)
+
+    // Track whether the user is scrolled near the bottom so we only
+    // auto-scroll on new messages when they're already there.
+    const isNearBottomRef = useRef(true)
+
+    // Track the previous message count and scroll height so we can
+    // restore position after prepending older messages.
+    const prevMessageCountRef = useRef(messages.length)
+    const scrollHeightBeforeLoadRef = useRef(0)
 
     // Mark the tab as active so unread count pauses while open.
     useEffect(() => {
@@ -23,10 +37,52 @@ export default function ChatPanel() {
         return () => setActive(false)
     }, [setActive])
 
-    // Scroll to bottom when new messages arrive.
+    // Scroll to bottom on initial load only.
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({behavior: 'smooth'})
+        bottomRef.current?.scrollIntoView()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    // After new messages arrive: scroll to bottom only if we were already there.
+    // After older messages are prepended: restore scroll position so the view
+    // doesn't jump.
+    useEffect(() => {
+        const container = scrollRef.current
+        if (!container) return
+
+        const prevCount = prevMessageCountRef.current
+        const newCount = messages.length
+        prevMessageCountRef.current = newCount
+
+        if (newCount <= prevCount) return
+
+        const addedAtTop = scrollHeightBeforeLoadRef.current > 0
+
+        if (addedAtTop) {
+            // Restore position: pin to where the user was before prepend.
+            const newScrollHeight = container.scrollHeight
+            container.scrollTop += newScrollHeight - scrollHeightBeforeLoadRef.current
+            scrollHeightBeforeLoadRef.current = 0
+        } else if (isNearBottomRef.current) {
+            bottomRef.current?.scrollIntoView({behavior: 'smooth'})
+        }
     }, [messages])
+
+    function handleScroll() {
+        const container = scrollRef.current
+        if (!container) return
+
+        const distanceFromBottom =
+            container.scrollHeight - container.scrollTop - container.clientHeight
+
+        isNearBottomRef.current = distanceFromBottom < 80
+
+        // Trigger older message load when within 60px of the top.
+        if (container.scrollTop < 60 && hasMore && !loadingOlder) {
+            scrollHeightBeforeLoadRef.current = container.scrollHeight
+            void loadOlderMessages()
+        }
+    }
 
     async function handleSend() {
         const trimmed = input.trim()
@@ -48,8 +104,23 @@ export default function ChatPanel() {
 
     return (
         <div className="flex flex-col h-[calc(100vh-57px)] max-w-2xl mx-auto">
-            <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
-                {messages.length === 0 ? (
+            <div
+                ref={scrollRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"
+            >
+                {/* Older messages indicator */}
+                {hasMore && (
+                    <div className="flex justify-center py-2">
+                        {loadingOlder ? (
+                            <span className="text-xs text-gray-400">Loading…</span>
+                        ) : (
+                            <span className="text-xs text-gray-400">Scroll up for older messages</span>
+                        )}
+                    </div>
+                )}
+
+                {messages.length === 0 && !hasMore ? (
                     <div className="flex flex-col items-center justify-center h-full text-center">
                         <div className="text-4xl mb-3 opacity-30">💬</div>
                         <p className="text-sm text-gray-400">
@@ -59,7 +130,8 @@ export default function ChatPanel() {
                 ) : (
                     messages.map((msg, i) => {
                         const prevMsg = messages[i - 1]
-                        // Group consecutive messages from the same sender.
+                        // Group consecutive messages from the same sender
+                        // sent within 5 minutes of each other.
                         const isGrouped =
                             prevMsg &&
                             prevMsg.senderName === msg.senderName &&
@@ -80,7 +152,7 @@ export default function ChatPanel() {
                                         </span>
                                     </div>
                                 )}
-                                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words pl-0">
+                                <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words">
                                     {msg.body}
                                 </p>
                             </div>
@@ -104,10 +176,7 @@ export default function ChatPanel() {
                             px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400
                             max-h-32 overflow-y-auto
                         "
-                        style={{
-                            height: 'auto',
-                            minHeight: '38px',
-                        }}
+                        style={{minHeight: '38px'}}
                         onInput={e => {
                             const el = e.currentTarget
                             el.style.height = 'auto'

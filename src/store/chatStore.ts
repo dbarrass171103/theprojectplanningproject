@@ -1,16 +1,19 @@
 ﻿// Chat store for a project's message history.
 //
 // On bindToProject:
-//   1. Fetches the last 100 messages from `chat_messages` as history.
-//   2. Subscribes to a Supabase broadcast channel for live delivery.
-//      Incoming broadcast events are appended to the in-memory list.
+//   1. Fetches the most recent PAGE_SIZE messages as initial history.
+//   2. Sets hasMore=true if exactly PAGE_SIZE rows came back, indicating
+//      older pages exist.
+//   3. Subscribes to a Supabase broadcast channel for live delivery.
+//
+// On loadOlderMessages:
+//   Fetches the next page using the oldest loaded message's createdAt as
+//   a cursor (lt filter), then prepends the results. Sets hasMore=false
+//   when fewer than PAGE_SIZE rows come back.
 //
 // On sendMessage:
-//   Inserts the row into Supabase and broadcasts it to peers
-//
-// The store also tracks `unreadCount` incremented whenever a message
-// arrives from someone else while `active` is false. The Chat tab clears
-// it on mount via markRead().
+//   Inserts the row into Supabase (durable) and broadcasts it to peers
+//   so they don't have to wait for a refetch.
 
 import {create} from 'zustand'
 import type {RealtimeChannel} from '@supabase/supabase-js'
@@ -18,12 +21,14 @@ import {getSupabaseForProject} from '../lib/supabase'
 import {colorForName} from '../utils/userColor'
 import type {ChatMessage} from '../types/chat'
 
-const HISTORY_LIMIT = 100
+const PAGE_SIZE = 50
 const BROADCAST_EVENT = 'chat-message'
 
 interface ChatStore {
     activeProjectId: string | null
     messages: ChatMessage[]
+    hasMore: boolean
+    loadingOlder: boolean
     unreadCount: number
 
     /** Whether the Chat tab is currently open. Controls unread counting. */
@@ -37,6 +42,7 @@ interface ChatStore {
     ) => Promise<void>
     unbind: () => void
 
+    loadOlderMessages: () => Promise<void>
     sendMessage: (body: string) => Promise<void>
     markRead: () => void
     setActive: (active: boolean) => void
@@ -62,6 +68,8 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
 export const useChatStore = create<ChatStore>((set, get) => ({
     activeProjectId: null,
     messages: [],
+    hasMore: false,
+    loadingOlder: false,
     unreadCount: 0,
     active: false,
 
@@ -80,22 +88,31 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         currentAdminToken = adminToken
         currentDisplayName = displayName
 
-        set({activeProjectId: projectId, messages: [], unreadCount: 0})
+        set({activeProjectId: projectId, messages: [], hasMore: false, unreadCount: 0})
 
         const client = getSupabaseForProject(memberToken, adminToken)
 
-        // Fetch history.
+        // Fetch the most recent PAGE_SIZE messages. We fetch descending so
+        // Supabase returns the newest first (needed for the cursor to work),
+        // then reverse before storing so the list is chronological.
         const {data, error} = await client
             .from('chat_messages')
             .select('*')
             .eq('project_id', projectId)
-            .order('created_at', {ascending: true})
-            .limit(HISTORY_LIMIT)
+            .order('created_at', {ascending: false})
+            .limit(PAGE_SIZE)
 
         if (error) {
             console.warn('Failed to load chat history:', error)
         } else if (data) {
-            set({messages: (data as Record<string, unknown>[]).map(rowToMessage)})
+            const messages = (data as Record<string, unknown>[])
+                .map(rowToMessage)
+                .reverse()
+            set({
+                messages,
+                // If we got a full page back, there are likely older messages.
+                hasMore: data.length === PAGE_SIZE,
+            })
         }
 
         // Subscribe for live messages from peers.
@@ -111,6 +128,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 set(state => {
                     // Guard against double-delivery when bindToProject is called
                     // more than once before the previous channel tears down
+                    // (e.g. React Strict Mode double-invoke in development).
                     if (state.messages.some(m => m.id === payload.id)) return state
 
                     return {
@@ -122,6 +140,41 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 })
             })
             .subscribe()
+    },
+
+    loadOlderMessages: async () => {
+        const {activeProjectId, messages, hasMore, loadingOlder} = get()
+        if (!activeProjectId || !currentMemberToken || !hasMore || loadingOlder) return
+
+        set({loadingOlder: true})
+
+        const oldest = messages[0]
+        const client = getSupabaseForProject(currentMemberToken, currentAdminToken)
+
+        const {data, error} = await client
+            .from('chat_messages')
+            .select('*')
+            .eq('project_id', activeProjectId)
+            // Fetch messages older than the oldest one we already have.
+            .lt('created_at', new Date(oldest.createdAt).toISOString())
+            .order('created_at', {ascending: false})
+            .limit(PAGE_SIZE)
+
+        if (error) {
+            console.warn('Failed to load older messages:', error)
+            set({loadingOlder: false})
+            return
+        }
+
+        const older = (data as Record<string, unknown>[])
+            .map(rowToMessage)
+            .reverse()
+
+        set(state => ({
+            messages: [...older, ...state.messages],
+            hasMore: data.length === PAGE_SIZE,
+            loadingOlder: false,
+        }))
     },
 
     unbind: () => {
@@ -138,7 +191,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         currentAdminToken = undefined
         currentDisplayName = ''
 
-        set({activeProjectId: null, messages: [], unreadCount: 0, active: false})
+        set({activeProjectId: null, messages: [], hasMore: false, loadingOlder: false, unreadCount: 0, active: false})
     },
 
     sendMessage: async (body) => {
@@ -171,7 +224,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
         const message = rowToMessage(data as Record<string, unknown>)
 
-        // Append locally (self=false on the channel means won't receive
+        // Append locally (self=false on the channel means we won't receive
         // our own broadcast).
         set(state => ({messages: [...state.messages, message]}))
 
