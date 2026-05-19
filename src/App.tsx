@@ -6,6 +6,7 @@ import Header from "./components/common/Header.tsx"
 import HomePage from './pages/HomePage'
 import KanbanPage from './pages/KanbanPage'
 import NotesPage from './pages/NotesPage'
+import ChatPage from './pages/ChatPage'
 import ProjectGuard from './components/common/ProjectGuard'
 
 function Layout() {
@@ -29,6 +30,7 @@ function App() {
                     <Route path="/p/:projectId" element={<ProjectGuard/>}>
                         <Route index element={<KanbanPage/>}/>
                         <Route path="notes" element={<NotesPage/>}/>
+                        <Route path="chat" element={<ChatPage/>}/>
                     </Route>
                 </Route>
             </Routes>

@@ -4,6 +4,7 @@
 import {useState} from 'react'
 import {NavLink, useNavigate} from 'react-router-dom'
 import {useCurrentProject} from '../../store/projectsStore'
+import {useChatStore} from '../../store/chatStore'
 import ShareProjectModal from './ShareProjectModal'
 import SyncIndicator from './SyncIndicator'
 
@@ -15,12 +16,14 @@ interface NavItem {
 const PROJECT_NAV_ITEMS: NavItem[] = [
     {to: '', label: 'Kanban Board'},
     {to: 'notes', label: 'Notes'},
+    {to: 'chat', label: 'Chat'},
 ]
 
 export default function Header() {
     const project = useCurrentProject()
     const navigate = useNavigate()
     const [showShare, setShowShare] = useState(false)
+    const unreadCount = useChatStore(s => s.unreadCount)
 
     return (
         <>
@@ -49,13 +52,15 @@ export default function Header() {
                                     ? `/p/${project.id}/${item.to}`
                                     : `/p/${project.id}`
 
+                                const isChatTab = item.to === 'chat'
+
                                 return (
                                     <NavLink
                                         key={path}
                                         to={path}
                                         end={item.to === ''}
                                         className={({isActive}) => `
-                                            text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap
+                                            relative text-sm px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap
                                             ${isActive
                                                 ? 'bg-blue-50 text-blue-600 font-medium'
                                                 : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'
@@ -63,6 +68,12 @@ export default function Header() {
                                         `}
                                     >
                                         {item.label}
+
+                                        {isChatTab && unreadCount > 0 && (
+                                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 leading-none">
+                                                {unreadCount > 99 ? '99+' : unreadCount}
+                                            </span>
+                                        )}
                                     </NavLink>
                                 )
                             })}

@@ -1,11 +1,12 @@
 ﻿// Owns the kanban board's Y.Doc for the current project. Delegates the
-// doc + provider lifecycle to useSyncedYDoc; binds the Kanban and Notes
-// stores to the doc on sync, and unbinds them on teardown.
+// doc + provider lifecycle to useSyncedYDoc; binds the Kanban, Notes, and
+// Chat stores to the project on sync, and unbinds them on teardown.
 
 import {useEffect} from 'react'
 import {useCurrentProject} from '../../store/projectsStore'
 import {useKanbanStore} from '../../store/kanbanStore'
 import {useNotesStore} from '../../store/notesStore'
+import {useChatStore} from '../../store/chatStore'
 import {useSyncedYDoc} from '../../sync/useSyncedYDoc'
 import {useSyncStatus} from '../../store/syncStatus'
 
@@ -39,11 +40,22 @@ export default function BoardProvider({children}: BoardProviderProps) {
         },
     })
 
-    // Paired with the bind inside onSync above.
+    useEffect(() => {
+        if (!project) return
+        void useChatStore.getState().bindToProject(
+            project.id,
+            project.memberToken,
+            project.adminToken,
+            project.displayName,
+        )
+    }, [project?.id])
+
+    // Paired with the binds above.
     useEffect(() => {
         return () => {
             useKanbanStore.getState().unbind()
             useNotesStore.getState().unbind()
+            useChatStore.getState().unbind()
             useSyncStatus.getState().setConnection('idle')
         }
     }, [project?.id])
