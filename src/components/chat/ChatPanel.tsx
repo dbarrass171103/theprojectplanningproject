@@ -1,6 +1,4 @@
-﻿// Chat panel — message history and input for the project chat.
-
-import {useEffect, useRef, useState} from 'react'
+﻿import {useEffect, useRef, useState} from 'react'
 import {useChatStore} from '../../store/chatStore'
 import {useCurrentProject} from '../../store/projectsStore'
 import type {ChatMessage} from '../../types/chat'
@@ -15,25 +13,36 @@ function ReplyPreview({
     replyToBody,
     isOwn,
     onScrollTo,
+    originalExists,
 }: {
     replyToId: string
     replyToSender: string
     replyToBody: string
     isOwn: boolean
     onScrollTo: (id: string) => void
+    originalExists: boolean
 }) {
+    const baseClass = `
+        w-full text-left mb-1.5 px-2 py-1 rounded-lg border-l-2 text-xs
+        ${isOwn
+            ? 'border-blue-300 bg-blue-400/30 text-blue-100'
+            : 'border-gray-300 bg-gray-200/60 text-gray-500'
+        }
+    `
+
+    if (!originalExists) {
+        return (
+            <div className={`${baseClass} opacity-60 cursor-default`}>
+                <span className="block italic">Original message deleted</span>
+            </div>
+        )
+    }
+
     return (
         <button
             type="button"
             onClick={() => onScrollTo(replyToId)}
-            className={`
-                w-full text-left mb-1.5 px-2 py-1 rounded-lg border-l-2 text-xs
-                transition-opacity hover:opacity-80
-                ${isOwn
-                    ? 'border-blue-300 bg-blue-400/30 text-blue-100'
-                    : 'border-gray-300 bg-gray-200/60 text-gray-500'
-                }
-            `}
+            className={`${baseClass} transition-opacity hover:opacity-80`}
         >
             <span className="font-semibold block truncate">{replyToSender}</span>
             <span className="block truncate">{replyToBody}</span>
@@ -132,7 +141,6 @@ export default function ChatPanel() {
     const scrollHeightBeforeLoadRef = useRef(0)
     const lastTypingSentRef = useRef(0)
     const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
-
     const displayName = project?.displayName ?? ''
 
     useEffect(() => {
@@ -344,17 +352,18 @@ export default function ChatPanel() {
                                             replyToBody={msg.replyToBody}
                                             isOwn={isOwn}
                                             onScrollTo={scrollToMessage}
+                                            originalExists={messages.some(m => m.id === msg.replyToId)}
                                         />
                                     )}
 
                                     {msg.body}
-
-                                    {msg.editedAt && (
-                                        <span className={`text-[10px] ml-1.5 ${isOwn ? 'text-blue-200' : 'text-gray-400'}`}>
-                                            (edited)
-                                        </span>
-                                    )}
                                 </div>
+
+                                {msg.editedAt && (
+                                    <span className="text-[10px] text-gray-400 mt-0.5">
+                                        edited
+                                    </span>
+                                )}
 
                                 {isOwn && msg.status === 'sending' && (
                                     <span className="text-[10px] text-gray-400 mt-0.5">
