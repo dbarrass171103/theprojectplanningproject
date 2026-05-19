@@ -15,6 +15,16 @@
 //   Inserts the row into Supabase (durable) and broadcasts it to peers
 //   so they don't have to wait for a refetch.
 
+// Optimistic sends: sendMessage immediately appends a message with
+// status='sending', then replaces it with the confirmed row on success
+// or marks it status='failed' on error. retryMessage re-attempts a failed
+// send by tempId.
+//
+// Typing indicators: setTyping broadcasts a 'typing' event on the chat
+// channel. Incoming typing events are stored in typingUsers keyed by
+// sender name with a timestamp; a cleanup interval expires entries older
+// than TYPING_TIMEOUT_MS so the indicator disappears automatically.
+
 import {create} from 'zustand'
 import type {RealtimeChannel} from '@supabase/supabase-js'
 import {getSupabaseForProject} from '../lib/supabase'
@@ -23,6 +33,14 @@ import type {ChatMessage} from '../types/chat'
 
 const PAGE_SIZE = 50
 const BROADCAST_EVENT = 'chat-message'
+const TYPING_EVENT = 'typing'
+const TYPING_TIMEOUT_MS = 2000
+
+interface TypingUser {
+    name: string
+    color: string
+    at: number
+}
 
 interface ChatStore {
     activeProjectId: string | null
@@ -30,9 +48,8 @@ interface ChatStore {
     hasMore: boolean
     loadingOlder: boolean
     unreadCount: number
-
-    /** Whether the Chat tab is currently open. Controls unread counting. */
     active: boolean
+    typingUsers: TypingUser[]
 
     bindToProject: (
         projectId: string,
@@ -44,6 +61,8 @@ interface ChatStore {
 
     loadOlderMessages: () => Promise<void>
     sendMessage: (body: string) => Promise<void>
+    retryMessage: (tempId: string) => Promise<void>
+    setTyping: () => void
     markRead: () => void
     setActive: (active: boolean) => void
 }
@@ -53,6 +72,7 @@ let channel: RealtimeChannel | null = null
 let currentMemberToken: string | null = null
 let currentAdminToken: string | undefined = undefined
 let currentDisplayName = ''
+let typingCleanupInterval: number | null = null
 
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
     return {
@@ -62,7 +82,12 @@ function rowToMessage(row: Record<string, unknown>): ChatMessage {
         senderColor: row.sender_color as string,
         body: row.body as string,
         createdAt: new Date(row.created_at as string).getTime(),
+        status: 'sent',
     }
+}
+
+function generateTempId(): string {
+    return `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
@@ -72,29 +97,34 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     loadingOlder: false,
     unreadCount: 0,
     active: false,
+    typingUsers: [],
 
     bindToProject: async (projectId, memberToken, adminToken, displayName) => {
-        // Clean up any previous subscription.
         if (channel) {
-            const client = getSupabaseForProject(
-                currentMemberToken!,
-                currentAdminToken,
-            )
+            const client = getSupabaseForProject(currentMemberToken!, currentAdminToken)
             client.removeChannel(channel)
             channel = null
+        }
+
+        if (typingCleanupInterval !== null) {
+            window.clearInterval(typingCleanupInterval)
+            typingCleanupInterval = null
         }
 
         currentMemberToken = memberToken
         currentAdminToken = adminToken
         currentDisplayName = displayName
 
-        set({activeProjectId: projectId, messages: [], hasMore: false, unreadCount: 0})
+        set({
+            activeProjectId: projectId,
+            messages: [],
+            hasMore: false,
+            unreadCount: 0,
+            typingUsers: [],
+        })
 
         const client = getSupabaseForProject(memberToken, adminToken)
 
-        // Fetch the most recent PAGE_SIZE messages. We fetch descending so
-        // Supabase returns the newest first (needed for the cursor to work),
-        // then reverse before storing so the list is chronological.
         const {data, error} = await client
             .from('chat_messages')
             .select('*')
@@ -108,14 +138,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             const messages = (data as Record<string, unknown>[])
                 .map(rowToMessage)
                 .reverse()
-            set({
-                messages,
-                // If we got a full page back, there are likely older messages.
-                hasMore: data.length === PAGE_SIZE,
-            })
+            set({messages, hasMore: data.length === PAGE_SIZE})
         }
 
-        // Subscribe for live messages from peers.
         channel = client.channel(`chat:${projectId}`, {
             config: {broadcast: {self: false}},
         })
@@ -126,20 +151,69 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 if (!payload) return
 
                 set(state => {
-                    // Guard against double-delivery when bindToProject is called
-                    // more than once before the previous channel tears down
-                    // (e.g. React Strict Mode double-invoke in development).
                     if (state.messages.some(m => m.id === payload.id)) return state
-
                     return {
-                        messages: [...state.messages, payload],
+                        messages: [...state.messages, {...payload, status: 'sent' as const}],
                         unreadCount: state.active
                             ? state.unreadCount
                             : state.unreadCount + 1,
                     }
                 })
             })
+            .on('broadcast', {event: TYPING_EVENT}, (msg) => {
+                const payload = msg.payload as {name: string; color: string} | undefined
+                if (!payload?.name || payload.name === currentDisplayName) return
+
+                set(state => {
+                    const existing = state.typingUsers.filter(u => u.name !== payload.name)
+                    return {
+                        typingUsers: [
+                            ...existing,
+                            {name: payload.name, color: payload.color, at: Date.now()},
+                        ],
+                    }
+                })
+            })
             .subscribe()
+
+        // Expire stale typing indicators every second.
+        typingCleanupInterval = window.setInterval(() => {
+            const now = Date.now()
+            set(state => {
+                const fresh = state.typingUsers.filter(
+                    u => now - u.at < TYPING_TIMEOUT_MS,
+                )
+                if (fresh.length === state.typingUsers.length) return state
+                return {typingUsers: fresh}
+            })
+        }, 1000)
+    },
+
+    unbind: () => {
+        if (channel && currentMemberToken) {
+            const client = getSupabaseForProject(currentMemberToken, currentAdminToken)
+            client.removeChannel(channel)
+            channel = null
+        }
+
+        if (typingCleanupInterval !== null) {
+            window.clearInterval(typingCleanupInterval)
+            typingCleanupInterval = null
+        }
+
+        currentMemberToken = null
+        currentAdminToken = undefined
+        currentDisplayName = ''
+
+        set({
+            activeProjectId: null,
+            messages: [],
+            hasMore: false,
+            loadingOlder: false,
+            unreadCount: 0,
+            active: false,
+            typingUsers: [],
+        })
     },
 
     loadOlderMessages: async () => {
@@ -155,7 +229,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             .from('chat_messages')
             .select('*')
             .eq('project_id', activeProjectId)
-            // Fetch messages older than the oldest one we already have.
             .lt('created_at', new Date(oldest.createdAt).toISOString())
             .order('created_at', {ascending: false})
             .limit(PAGE_SIZE)
@@ -177,23 +250,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         }))
     },
 
-    unbind: () => {
-        if (channel && currentMemberToken) {
-            const client = getSupabaseForProject(
-                currentMemberToken,
-                currentAdminToken,
-            )
-            client.removeChannel(channel)
-            channel = null
-        }
-
-        currentMemberToken = null
-        currentAdminToken = undefined
-        currentDisplayName = ''
-
-        set({activeProjectId: null, messages: [], hasMore: false, loadingOlder: false, unreadCount: 0, active: false})
-    },
-
     sendMessage: async (body) => {
         const trimmed = body.trim()
         if (!trimmed) return
@@ -201,38 +257,52 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         const {activeProjectId} = get()
         if (!activeProjectId || !currentMemberToken) return
 
-        const client = getSupabaseForProject(currentMemberToken, currentAdminToken)
+        const tempId = generateTempId()
         const senderColor = colorForName(currentDisplayName)
 
-        const row = {
-            project_id: activeProjectId,
-            sender_name: currentDisplayName,
-            sender_color: senderColor,
+        // Append optimistically before the network round-trip.
+        const optimistic: ChatMessage = {
+            id: tempId,
+            tempId,
+            projectId: activeProjectId,
+            senderName: currentDisplayName,
+            senderColor,
             body: trimmed,
+            createdAt: Date.now(),
+            status: 'sending',
         }
 
-        const {data, error} = await client
-            .from('chat_messages')
-            .insert(row)
-            .select()
-            .single()
+        set(state => ({messages: [...state.messages, optimistic]}))
 
-        if (error) {
-            console.warn('Failed to send message:', error)
-            return
-        }
+        await doSend(tempId, activeProjectId, trimmed, senderColor, set)
+    },
 
-        const message = rowToMessage(data as Record<string, unknown>)
+    retryMessage: async (tempId) => {
+        const {messages, activeProjectId} = get()
+        if (!activeProjectId || !currentMemberToken) return
 
-        // Append locally (self=false on the channel means we won't receive
-        // our own broadcast).
-        set(state => ({messages: [...state.messages, message]}))
+        const msg = messages.find(m => m.tempId === tempId)
+        if (!msg) return
 
-        // Broadcast to peers so they get it instantly without polling.
-        await channel?.send({
+        // Reset to sending state before retrying.
+        set(state => ({
+            messages: state.messages.map(m =>
+                m.tempId === tempId ? {...m, status: 'sending' as const} : m,
+            ),
+        }))
+
+        await doSend(tempId, activeProjectId, msg.body, msg.senderColor, set)
+    },
+
+    setTyping: () => {
+        if (!channel) return
+        void channel.send({
             type: 'broadcast',
-            event: BROADCAST_EVENT,
-            payload: message,
+            event: TYPING_EVENT,
+            payload: {
+                name: currentDisplayName,
+                color: colorForName(currentDisplayName),
+            },
         })
     },
 
@@ -243,3 +313,52 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         if (active) set({unreadCount: 0})
     },
 }))
+
+// Extracted so both sendMessage and retryMessage can share the same
+// insert + broadcast logic without duplicating error handling.
+async function doSend(
+    tempId: string,
+    projectId: string,
+    body: string,
+    senderColor: string,
+    set: (fn: (state: ChatStore) => Partial<ChatStore>) => void,
+) {
+    const client = getSupabaseForProject(currentMemberToken!, currentAdminToken)
+
+    const {data, error} = await client
+        .from('chat_messages')
+        .insert({
+            project_id: projectId,
+            sender_name: currentDisplayName,
+            sender_color: senderColor,
+            body,
+        })
+        .select()
+        .single()
+
+    if (error) {
+        console.warn('Failed to send message:', error)
+        set(state => ({
+            messages: state.messages.map(m =>
+                m.tempId === tempId ? {...m, status: 'failed' as const} : m,
+            ),
+        }))
+        return
+    }
+
+    const confirmed = rowToMessage(data as Record<string, unknown>)
+
+    // Replace the optimistic entry with the confirmed one, preserving tempId
+    // so retryMessage can still find it if needed.
+    set(state => ({
+        messages: state.messages.map(m =>
+            m.tempId === tempId ? {...confirmed, tempId} : m,
+        ),
+    }))
+
+    await channel?.send({
+        type: 'broadcast',
+        event: BROADCAST_EVENT,
+        payload: confirmed,
+    })
+}
