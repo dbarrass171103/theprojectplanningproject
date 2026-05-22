@@ -17,6 +17,7 @@ const PROJECT_NAV_ITEMS: NavItem[] = [
     {to: '', label: 'Kanban Board'},
     {to: 'notes', label: 'Notes'},
     {to: 'chat', label: 'Chat'},
+    {to: 'calendar', label: 'Calendar'},
 ]
 
 export default function Header() {

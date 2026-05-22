@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage'
 import KanbanPage from './pages/KanbanPage'
 import NotesPage from './pages/NotesPage'
 import ChatPage from './pages/ChatPage'
+import CalendarPage from './pages/CalendarPage'
 import ProjectGuard from './components/common/ProjectGuard'
 
 function Layout() {
@@ -31,6 +32,7 @@ function App() {
                         <Route index element={<KanbanPage/>}/>
                         <Route path="notes" element={<NotesPage/>}/>
                         <Route path="chat" element={<ChatPage/>}/>
+                        <Route path="calendar" element={<CalendarPage/>}/>
                     </Route>
                 </Route>
             </Routes>

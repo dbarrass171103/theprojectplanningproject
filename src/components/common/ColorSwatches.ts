@@ -51,3 +51,14 @@ export const COLUMN_COLOR_SWATCHES: ColumnColorSwatch[] = [
     {name: 'Pink',   cardColor: '#fce7f3', columnColor: '#fbcfe8'},   // pink-100   / pink-200
     {name: 'Gray',   cardColor: '#f3f4f6', columnColor: '#e5e7eb'},   // gray-100   / gray-200
 ]
+
+export const EVENT_COLORS = [
+    {name: 'Blue',   value: '#3b82f6'},
+    {name: 'Green',  value: '#22c55e'},
+    {name: 'Red',    value: '#ef4444'},
+    {name: 'Purple', value: '#a855f7'},
+    {name: 'Orange', value: '#f97316'},
+    {name: 'Pink',   value: '#ec4899'},
+    {name: 'Teal',   value: '#14b8a6'},
+    {name: 'Yellow', value: '#eab308'},
+]
