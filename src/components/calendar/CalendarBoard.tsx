@@ -7,7 +7,7 @@ import {useCalendarStore} from '../../store/calendarStore'
 import type {CalendarEvent} from '../../types/calendar'
 import EventModal from './EventModal'
 
-type View = 'month' | 'week' | 'day'
+type View = 'month' | 'week' | 'day' | 'agenda'
 
 function toDateStr(d: Date): string {
     return d.toISOString().slice(0, 10)
@@ -57,7 +57,7 @@ export default function CalendarBoard() {
     function prev() {
         setCursor(c => {
             const d = new Date(c)
-            if (view === 'month') d.setMonth(d.getMonth() - 1)
+            if (view === 'month' || view === 'agenda') d.setMonth(d.getMonth() - 1)
             else if (view === 'week') d.setDate(d.getDate() - 7)
             else d.setDate(d.getDate() - 1)
             return d
@@ -67,7 +67,7 @@ export default function CalendarBoard() {
     function next() {
         setCursor(c => {
             const d = new Date(c)
-            if (view === 'month') d.setMonth(d.getMonth() + 1)
+            if (view === 'month' || view === 'agenda') d.setMonth(d.getMonth() + 1)
             else if (view === 'week') d.setDate(d.getDate() + 7)
             else d.setDate(d.getDate() + 1)
             return d
@@ -95,6 +95,9 @@ export default function CalendarBoard() {
                 return `${MONTH_NAMES[ws.getMonth()]} ${ws.getDate()}–${we.getDate()}, ${ws.getFullYear()}`
             }
             return `${MONTH_NAMES[ws.getMonth()]} ${ws.getDate()} – ${MONTH_NAMES[we.getMonth()]} ${we.getDate()}, ${ws.getFullYear()}`
+        }
+        if (view === 'agenda') {
+            return `${MONTH_NAMES[cursor.getMonth()]} ${cursor.getFullYear()}`
         }
         return `${DAY_NAMES_LONG[cursor.getDay()]}, ${MONTH_NAMES[cursor.getMonth()]} ${cursor.getDate()}, ${cursor.getFullYear()}`
     }, [view, cursor])
@@ -598,6 +601,116 @@ export default function CalendarBoard() {
         )
     }
 
+
+    function renderAgenda() {
+        const year  = cursor.getFullYear()
+        const month = cursor.getMonth()
+
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
+        const days: { dateStr: string; dayEvents: CalendarEvent[] }[] = []
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = toDateStr(new Date(year, month, d))
+            const dayEvents = events
+                .filter(e => eventSpansDate(e, dateStr))
+                .sort((a, b) => {
+                    // All-day events first, then by start time
+                    if (!a.startTime && b.startTime) return -1
+                    if (a.startTime && !b.startTime) return 1
+                    return (a.startTime ?? '').localeCompare(b.startTime ?? '')
+                })
+            if (dayEvents.length > 0) {
+                days.push({ dateStr, dayEvents })
+            }
+        }
+
+        const isCurrentMonth = year === new Date().getFullYear() && month === new Date().getMonth()
+
+        return (
+            <div className="flex-1 overflow-y-auto">
+                {days.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm gap-2">
+                        <span className="text-2xl">📭</span>
+                        <span>No events in {MONTH_NAMES[month]} {year}</span>
+                        <button
+                            onClick={() => handleDateClick(today)}
+                            className="mt-1 text-blue-500 hover:text-blue-600 text-sm"
+                        >
+                            + New event
+                        </button>
+                    </div>
+                ) : (
+                    <div className="max-w-2xl mx-auto py-4 px-4 flex flex-col gap-1">
+                        {!isCurrentMonth && (
+                            <div className="flex justify-end mb-2">
+                                <button
+                                    onClick={() => setCursor(new Date())}
+                                    className="text-xs text-blue-500 hover:text-blue-600"
+                                >
+                                    Jump to today ↓
+                                </button>
+                            </div>
+                        )}
+
+                        {days.map(({ dateStr, dayEvents }) => {
+                            const date    = new Date(dateStr + 'T00:00:00')
+                            const isToday = dateStr === today
+                            const isPast  = dateStr < today
+
+                            return (
+                                <div key={dateStr} className="flex gap-4 group">
+                                    {/* Date label */}
+                                    <div className="w-24 shrink-0 pt-2 text-right">
+                                        <div className={`text-xs font-medium uppercase tracking-wide ${isPast ? 'text-gray-400' : 'text-gray-500'}`}>
+                                            {DAY_NAMES_SHORT[date.getDay()]}
+                                        </div>
+                                        <div className={`
+                                            text-2xl font-semibold leading-tight
+                                            ${isToday ? 'text-blue-500' : isPast ? 'text-gray-400' : 'text-gray-700'}
+                                        `}>
+                                            {date.getDate()}
+                                        </div>
+                                    </div>
+
+                                    {/* Events for this day */}
+                                    <div className="flex-1 flex flex-col gap-1.5 py-2 border-t border-gray-100 group-first:border-0">
+                                        {dayEvents.map(ev => (
+                                            <button
+                                                key={ev.id}
+                                                onClick={e => handleEventClick(ev, e)}
+                                                className={`
+                                                    w-full text-left rounded-lg px-3 py-2 flex items-start gap-3
+                                                    hover:brightness-95 transition-all
+                                                    ${isPast ? 'opacity-60' : ''}
+                                                `}
+                                                style={{backgroundColor: ev.color + '22', borderLeft: `3px solid ${ev.color}`}}
+                                            >
+                                                <div className="flex-1 min-w-0">
+                                                    <span className={`text-sm font-medium ${isPast ? 'text-gray-500' : 'text-gray-800'}`}>
+                                                        {ev.title}
+                                                    </span>
+                                                    {ev.description && (
+                                                        <p className="text-xs text-gray-400 truncate mt-0.5">{ev.description}</p>
+                                                    )}
+                                                </div>
+                                                <span className="text-xs text-gray-400 shrink-0 pt-0.5">
+                                                    {ev.startTime
+                                                        ? `${ev.startTime}${ev.endTime ? ` – ${ev.endTime}` : ''}`
+                                                        : 'All day'
+                                                    }
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                )}
+            </div>
+        )
+    }
+
     return (
         <div className="flex flex-col h-[calc(100vh-57px)]">
             {/* Toolbar */}
@@ -628,7 +741,7 @@ export default function CalendarBoard() {
 
                 {/* View switcher */}
                 <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-                    {(['month', 'week', 'day'] as View[]).map(v => (
+                    {(['month', 'week', 'day', 'agenda'] as View[]).map(v => (
                         <button
                             key={v}
                             onClick={() => setView(v)}
@@ -655,7 +768,8 @@ export default function CalendarBoard() {
             {/* Calendar body */}
             {view === 'month' && renderMonth()}
             {view === 'week' && renderWeek()}
-            {view === 'day'  && renderDay()}
+            {view === 'day' && renderDay()}
+            {view === 'agenda' && renderAgenda()}
 
             {/* Modals */}
             {(modalDate || modalEvent) && (
