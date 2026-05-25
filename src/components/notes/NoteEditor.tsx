@@ -24,9 +24,12 @@ import {useSyncedYDoc} from '../../sync/useSyncedYDoc'
 import {colorForName} from '../../utils/userColor'
 import {CardMention} from '../../tiptap/CardMention'
 import {createCardMentionSuggestion} from '../../tiptap/cardMentionSuggestion'
+import {ResizableImage} from '../../tiptap/ResizableImage'
+import {uploadNoteImage, ImageUploadError} from '../../utils/uploadNoteImage'
 import EditorToolbar from './EditorToolbar'
 import EditorBubbleMenu from './EditorBubbleMenu'
 import NoteBacklinks from './NoteBacklinks'
+import {useImageCleanup} from './useImageCleanup'
 
 interface NoteEditorProps {
     note: Note
@@ -144,6 +147,14 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
                 placeholder: "Start writing… (try ** for bold, # for headings, @ to link a card)",
             }),
             CardMention.configure({suggestion: createCardMentionSuggestion()}),
+            // URL-only image attribute. Base64 would bloat the Y.Doc
+            // snapshot we write to Postgres on every debounced update,
+            // and one large image could push us past the row size limit.
+            ResizableImage.configure({
+                allowBase64: false,
+                inline: false,
+                HTMLAttributes: {class: 'editor-image'},
+            }),
             Collaboration.configure({document: doc}),
             CollaborationCaret.configure({
                 provider: {awareness} as never,
@@ -177,6 +188,32 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
                 navigate('/', {state: {flashCardId: cardId}})
                 return true
             },
+            // Paste images from the clipboard: upload them, then insert
+            // each one at the current selection.
+            handlePaste: (_view, event) => {
+                const files = Array.from(event.clipboardData?.files ?? [])
+                    .filter(f => f.type.startsWith('image/'))
+                if (files.length === 0) return false
+
+                event.preventDefault()
+                insertImageFiles(files, project, note.id, editor)
+                return true
+            },
+            // Drag-and-drop image files from the OS into the editor.
+            // `moved` is true when ProseMirror is dragging a node from
+            // within the doc; we leave those alone.
+            handleDrop: (_view, event, _slice, moved) => {
+                if (moved) return false
+
+                const dragEvent = event as DragEvent
+                const files = Array.from(dragEvent.dataTransfer?.files ?? [])
+                    .filter(f => f.type.startsWith('image/'))
+                if (files.length === 0) return false
+
+                event.preventDefault()
+                insertImageFiles(files, project, note.id, editor)
+                return true
+            },
         },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [doc, awareness, project.displayName])
@@ -208,6 +245,11 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
         }
     }, [editor])
 
+    // Diff image URLs across editor updates and delete orphans from
+    // storage. Deferred so undo can rescue an accidentally-removed
+    // image before the file is actually gone.
+    useImageCleanup(editor, project)
+
     function handleTitleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
         if (e.key === 'Enter') {
             e.preventDefault()
@@ -221,7 +263,7 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
 
     return (
         <div className="flex flex-col h-full overflow-y-auto">
-            <EditorToolbar editor={editor}/>
+            <EditorToolbar editor={editor} project={project} noteId={note.id}/>
 
             <div className="px-8 pt-8 pb-2">
                 <input
@@ -242,4 +284,29 @@ function SyncedNoteEditor({note, project, doc, awareness}: SyncedProps) {
             <NoteBacklinks noteId={note.id}/>
         </div>
     )
+}
+
+// Upload each file and insert it at the current selection in order.
+// Failures use window.alert — crude, but it matches handleLinkClick's
+// existing prompt-based UX and we don't have a toast system yet.
+function insertImageFiles(
+    files: File[],
+    project: KnownProject,
+    noteId: string,
+    editor: ReturnType<typeof useEditor>,
+): void {
+    if (!editor) return
+
+    files.forEach(async file => {
+        try {
+            const url = await uploadNoteImage(file, project, noteId)
+            editor.chain().focus().setImage({src: url}).run()
+        } catch (e) {
+            const message = e instanceof ImageUploadError
+                ? e.message
+                : 'Failed to upload image'
+            console.error(e)
+            window.alert(message)
+        }
+    })
 }

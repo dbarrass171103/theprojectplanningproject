@@ -1,9 +1,12 @@
 ﻿// Persistent toolbar for the note editor, with block-level and inline
 // formatting controls.
 
+import {useRef} from 'react'
 import {useEditorState, type Editor} from '@tiptap/react'
 import ColorPickerButton from './ColorPickerButton'
 import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from '../common/ColorSwatches.ts'
+import {uploadNoteImage, ImageUploadError} from '../../utils/uploadNoteImage'
+import type {KnownProject} from '../../store/projectsStore'
 
 interface ToolbarButtonProps {
     onClick: () => void
@@ -42,6 +45,10 @@ function ToolbarButton({onClick, isActive, disabled, label, shortcut, children}:
 
 interface EditorToolbarProps {
     editor: Editor | null
+    // project + noteId are threaded through from NoteEditor so the
+    // image-upload button can hand them to uploadNoteImage().
+    project: KnownProject
+    noteId: string
 }
 
 const isMac =
@@ -51,7 +58,9 @@ const isMac =
 const mod = isMac ? '⌘' : 'Ctrl'
 const shift = isMac ? '⇧' : 'Shift'
 
-export default function EditorToolbar({editor}: EditorToolbarProps) {
+export default function EditorToolbar({editor, project, noteId}: EditorToolbarProps) {
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
     const state = useEditorState({
         editor,
         selector: ({editor}) => {
@@ -105,6 +114,31 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
     function handleClearFormatting() {
         if (!editor) return;
         editor.chain().focus().unsetAllMarks().clearNodes().run()
+    }
+
+    function handleImageButtonClick() {
+        fileInputRef.current?.click()
+    }
+
+    async function handleImageFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+        const files = Array.from(e.target.files ?? [])
+        // Reset the input value so the same file can be picked again
+        // later — without this, picking the same image twice in a row
+        // would silently do nothing.
+        e.target.value = ''
+
+        for (const file of files) {
+            try {
+                const url = await uploadNoteImage(file, project, noteId)
+                editor?.chain().focus().setImage({src: url}).run()
+            } catch (err) {
+                const message = err instanceof ImageUploadError
+                    ? err.message
+                    : 'Failed to upload image'
+                console.error(err)
+                window.alert(message)
+            }
+        }
     }
 
     return (
@@ -307,6 +341,25 @@ export default function EditorToolbar({editor}: EditorToolbarProps) {
             >
                 "
             </ToolbarButton>
+
+            <div className="w-px h-5 bg-gray-200 mx-1"/>
+
+            <ToolbarButton
+                onClick={handleImageButtonClick}
+                label="Insert image"
+            >
+                🖼
+            </ToolbarButton>
+
+            {/* Hidden file picker, opened by the toolbar button above. */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={handleImageFileChange}
+            />
 
             <div className="w-px h-5 bg-gray-200 mx-1"/>
 

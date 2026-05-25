@@ -24,6 +24,8 @@ import {
     snapshotNotes,
     getNotesOrder,
 } from '../utils/boardYdoc'
+import {deleteImagesForNote} from '../utils/uploadNoteImage'
+import {getCurrentProject} from './projectsStore'
 
 function selectedIdKey(projectId: string): string {
     return `notes-selected:${projectId}`
@@ -199,6 +201,16 @@ export const useNotesStore = create<NotesStore>((set) => ({
         if (!doc) return
 
         ydocRemoveNote(doc, id)
+
+        // Fire-and-forget cleanup of any uploaded images for this note.
+        // We pull project from the store rather than threading it in so
+        // existing callers of deleteNote() don't need to change. If the
+        // delete fails, the note metadata is still gone — the orphaned
+        // blob is a nuisance, not a correctness issue.
+        const project = getCurrentProject()
+        if (project) {
+            void deleteImagesForNote(project, id)
+        }
 
         // The Y.Doc 'update' event fires synchronously, so by the time
         // this set() runs, state.order is the post-deletion array.

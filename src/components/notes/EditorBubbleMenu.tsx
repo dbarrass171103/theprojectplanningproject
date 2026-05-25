@@ -4,6 +4,7 @@
 
 import {BubbleMenu} from '@tiptap/react/menus'
 import {useEditorState, type Editor} from '@tiptap/react'
+import {NodeSelection} from '@tiptap/pm/state'
 import ColorPickerButton from './ColorPickerButton'
 import {TEXT_COLOR_SWATCHES, HIGHLIGHT_SWATCHES} from '../common/ColorSwatches.ts'
 
@@ -93,9 +94,17 @@ export default function EditorBubbleMenu({editor}: EditorBubbleMenuProps) {
         <BubbleMenu
             editor={editor}
             options={{placement: 'top', offset: 8}}
-            shouldShow={({editor, from, to}) => {
+            shouldShow={({editor, state, from, to}) => {
                 if (from === to) return false
                 if (editor.isActive('codeBlock')) return false
+                // Hide when a whole node is selected (image, hr, future
+                // embeds). Atom / non-textblock nodes don't accept inline
+                // marks, so the bold/italic/etc. controls would either
+                // do nothing or apply to text after the node.
+                const sel = state.selection
+                if (sel instanceof NodeSelection && (sel.node.isAtom || !sel.node.isTextblock)) {
+                    return false
+                }
                 return true
             }}
         >
