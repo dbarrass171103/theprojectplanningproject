@@ -9,12 +9,18 @@ export default function HomePage() {
     const knownProjects = useProjectsStore(s => s.knownProjects)
     const createProject = useProjectsStore(s => s.createProject)
     const setCurrentProject = useProjectsStore(s => s.setCurrentProject)
+    const leaveProject = useProjectsStore(s => s.leaveProject)
+    const updateDisplayName = useProjectsStore(s => s.updateDisplayName)
 
     const [creating, setCreating] = useState(false)
     const [newProjectName, setNewProjectName] = useState('')
     const [displayName, setDisplayName] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [busy, setBusy] = useState(false)
+
+    const [editingId, setEditingId] = useState<string | null>(null)
+    const [editingName, setEditingName] = useState('')
+    const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
 
     // Clear the active project when landing here.
     useEffect(() => {
@@ -55,6 +61,25 @@ export default function HomePage() {
         navigate(`/p/${id}`)
     }
 
+    function startRename(id: string, currentName: string) {
+        setConfirmRemoveId(null)
+        setEditingId(id)
+        setEditingName(currentName)
+    }
+
+    function commitRename() {
+        if (editingId && editingName.trim()) {
+            updateDisplayName(editingId, editingName.trim())
+        }
+        setEditingId(null)
+        setEditingName('')
+    }
+
+    function cancelRename() {
+        setEditingId(null)
+        setEditingName('')
+    }
+
     return (
         <div className="max-w-2xl mx-auto p-8">
             <h1 className="text-2xl font-semibold text-gray-800 mb-2">Your projects</h1>
@@ -68,22 +93,108 @@ export default function HomePage() {
                         Recent
                     </h2>
                     <ul className="flex flex-col gap-2">
-                        {sortedProjects.map(p => (
-                            <li key={p.id}>
-                                <button
-                                    onClick={() => handleOpenProject(p.id)}
-                                    className="w-full text-left bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm rounded-lg px-4 py-3 transition-all"
-                                >
-                                    <div className="font-medium text-gray-800">{p.name}</div>
-                                    <div className="text-xs text-gray-500 mt-0.5">
-                                        as {p.displayName}
-                                        {p.adminToken && (
-                                            <span className="ml-2 text-amber-600">· admin</span>
+                        {sortedProjects.map(p => {
+                            const isEditing = editingId === p.id
+                            const isConfirming = confirmRemoveId === p.id
+
+                            if (isEditing) {
+                                return (
+                                    <li key={p.id}>
+                                        <div className="bg-white border border-blue-300 rounded-lg px-4 py-3 flex flex-col gap-2">
+                                            <div className="font-medium text-gray-800">{p.name}</div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-gray-500 shrink-0">Your name:</span>
+                                                <input
+                                                    autoFocus
+                                                    type="text"
+                                                    value={editingName}
+                                                    onChange={e => setEditingName(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') commitRename()
+                                                        if (e.key === 'Escape') cancelRename()
+                                                    }}
+                                                    className="flex-1 text-sm rounded-lg border border-gray-300 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                                />
+                                                <button
+                                                    onClick={commitRename}
+                                                    disabled={!editingName.trim()}
+                                                    className="text-sm bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg px-3 py-1 transition-colors"
+                                                >
+                                                    Save
+                                                </button>
+                                                <button
+                                                    onClick={cancelRename}
+                                                    className="text-sm text-gray-500 hover:text-gray-700 rounded-lg px-2 py-1"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </li>
+                                )
+                            }
+
+                            return (
+                                <li key={p.id} className="relative group">
+                                    <button
+                                        onClick={() => handleOpenProject(p.id)}
+                                        className="w-full text-left bg-white border border-gray-200 hover:border-gray-300 hover:shadow-sm rounded-lg px-4 py-3 pr-28 transition-all"
+                                    >
+                                        <div className="font-medium text-gray-800">{p.name}</div>
+                                        <div className="text-xs text-gray-500 mt-0.5">
+                                            as {p.displayName}
+                                            {p.adminToken && (
+                                                <span className="ml-2 text-amber-600">· admin</span>
+                                            )}
+                                        </div>
+                                    </button>
+
+                                    <div className="absolute top-1/2 -translate-y-1/2 right-3 flex items-center gap-1">
+                                        {isConfirming ? (
+                                            <>
+                                                <span className="text-xs text-gray-500 mr-1">Remove?</span>
+                                                <button
+                                                    onClick={() => {
+                                                        leaveProject(p.id)
+                                                        setConfirmRemoveId(null)
+                                                    }}
+                                                    title="You'll need the invite link to rejoin"
+                                                    className="text-xs bg-red-500 hover:bg-red-600 text-white rounded px-2 py-1 transition-colors"
+                                                >
+                                                    Remove
+                                                </button>
+                                                <button
+                                                    onClick={() => setConfirmRemoveId(null)}
+                                                    className="text-xs text-gray-500 hover:text-gray-700 rounded px-1.5 py-1"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => startRename(p.id, p.displayName)}
+                                                    title="Change your display name"
+                                                    className="text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded px-2 py-1 transition-colors"
+                                                >
+                                                    Rename
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setConfirmRemoveId(p.id)
+                                                        setEditingId(null)
+                                                    }}
+                                                    title="Remove from this device"
+                                                    className="text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded px-2 py-1 transition-colors"
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
                                         )}
                                     </div>
-                                </button>
-                            </li>
-                        ))}
+                                </li>
+                            )
+                        })}
                     </ul>
                 </div>
             )}
