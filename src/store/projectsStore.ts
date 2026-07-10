@@ -10,9 +10,11 @@ export interface KnownProject {
     id: string
     name: string
     memberToken: string
+    inviteToken?: string
     adminToken?: string
     displayName: string
     joinedAt: number
+    tokenMigrated?: boolean
 }
 
 interface ProjectsStore {
@@ -20,10 +22,14 @@ interface ProjectsStore {
     currentProjectId: string | null
 
     createProject: (name: string, displayName: string) => Promise<KnownProject>
-    joinProject: (id: string, memberToken: string, displayName: string) => Promise<KnownProject>
+    joinProject: (id: string, inviteToken: string, adminToken: string | undefined, displayName: string) => Promise<KnownProject>
+    ensureMembership: (id: string) => Promise<void>
     setCurrentProject: (id: string | null) => void
     leaveProject: (id: string) => void
     updateDisplayName: (projectId: string, displayName: string) => void
+    updateInviteToken: (projectId: string, inviteToken: string) => void
+    renameProject: (projectId: string, name: string) => Promise<void>
+    deleteProject: (projectId: string) => Promise<void>
 }
 
 interface PersistedState {
@@ -58,20 +64,33 @@ export const useProjectsStore = create<ProjectsStore>((set) => ({
 
     createProject: async (name, displayName) => {
         const id = generateProjectId()
-        const memberToken = generateToken()
+        const inviteToken = generateToken()
         const adminToken = generateToken()
+        const personalToken = generateToken()
 
         const {error} = await supabase
             .from('projects')
             .insert({
                 id,
                 name: name.trim() || 'Untitled project',
-                member_token: memberToken,
+                member_token: inviteToken,
                 admin_token: adminToken,
             })
 
         if (error) {
             throw new Error(`Failed to create project: ${error.message}`)
+        }
+
+        // Register the creator as an admin member and mint their token
+        const {error: joinError} = await supabase.rpc('join_project', {
+            p_project_id: id,
+            p_invite_token: inviteToken,
+            p_admin_token: adminToken,
+            p_display_name: displayName,
+            p_member_token: personalToken,
+        })
+        if (joinError) {
+            throw new Error(`Failed to create project membership: ${joinError.message}`)
         }
 
         // Seed the board document with the three default columns
@@ -86,7 +105,7 @@ export const useProjectsStore = create<ProjectsStore>((set) => ({
         // Failure here is non-fatal: the project is still usable, it will
         // just open with no columns and the user can add their own.
         try {
-            const projectClient = getSupabaseForProject(memberToken, adminToken)
+            const projectClient = getSupabaseForProject(personalToken, adminToken)
             const {error: seedError} = await projectClient
                 .from('board_documents')
                 .upsert(
@@ -108,10 +127,12 @@ export const useProjectsStore = create<ProjectsStore>((set) => ({
         const project: KnownProject = {
             id,
             name: name.trim() || 'Untitled project',
-            memberToken,
+            memberToken: personalToken,
+            inviteToken,
             adminToken,
             displayName,
             joinedAt: Date.now(),
+            tokenMigrated: true,
         }
 
         set((state) => {
@@ -123,27 +144,37 @@ export const useProjectsStore = create<ProjectsStore>((set) => ({
         return project
     },
 
-    joinProject: async (id, memberToken, displayName) => {
-        const client = getSupabaseForProject(memberToken)
-        const {data, error} = await client
-            .from('projects')
-            .select('id, name')
-            .eq('id', id)
-            .maybeSingle()
+    joinProject: async (id, inviteToken, adminToken, displayName) => {
+        const personalToken = generateToken()
+
+        const {data, error} = await supabase.rpc('join_project', {
+            p_project_id: id,
+            p_invite_token: inviteToken,
+            p_admin_token: adminToken ?? '',
+            p_display_name: displayName,
+            p_member_token: personalToken,
+        })
 
         if (error) {
-            throw new Error(`Failed to verify project: ${error.message}`)
-        }
-        if (!data) {
             throw new Error('Project not found, or the link is invalid.')
         }
 
+        // join_project returns a single {role, project_name} row.
+        const row = Array.isArray(data) ? data[0] : data
+        const role: string | undefined = row?.role
+        const projectName: string = row?.project_name ?? 'Untitled project'
+
+        const isAdmin = role === 'admin'
+
         const project: KnownProject = {
-            id: data.id,
-            name: data.name,
-            memberToken,
+            id,
+            name: projectName,
+            memberToken: personalToken,
+            inviteToken: isAdmin ? inviteToken : undefined,
+            adminToken: isAdmin ? adminToken : undefined,
             displayName,
             joinedAt: Date.now(),
+            tokenMigrated: true,
         }
 
         set((state) => {
@@ -153,6 +184,44 @@ export const useProjectsStore = create<ProjectsStore>((set) => ({
         })
 
         return project
+    },
+
+    ensureMembership: async (id) => {
+        const existing = useProjectsStore.getState().knownProjects[id]
+        if (!existing || existing.tokenMigrated) return
+
+        // Legacy: the stored memberToken is still the shared invite
+        // token. Exchange it for a personal token via join_project.
+        const inviteToken = existing.memberToken
+        const personalToken = generateToken()
+
+        const {error} = await supabase.rpc('join_project', {
+            p_project_id: id,
+            p_invite_token: inviteToken,
+            p_admin_token: existing.adminToken ?? '',
+            p_display_name: existing.displayName,
+            p_member_token: personalToken,
+        })
+
+        if (error) {
+            console.warn('Failed to migrate to a personal token:', error)
+            return
+        }
+
+        set((state) => {
+            const prev = state.knownProjects[id]
+            if (!prev) return state
+            const isAdmin = !!prev.adminToken
+            const updated: KnownProject = {
+                ...prev,
+                memberToken: personalToken,
+                inviteToken: isAdmin ? inviteToken : undefined,
+                tokenMigrated: true,
+            }
+            const knownProjects = {...state.knownProjects, [id]: updated}
+            saveState({knownProjects, currentProjectId: state.currentProjectId})
+            return {knownProjects}
+        })
     },
 
     setCurrentProject: (id) =>
@@ -190,6 +259,61 @@ export const useProjectsStore = create<ProjectsStore>((set) => ({
             saveState({knownProjects, currentProjectId: state.currentProjectId})
             return {knownProjects}
         }),
+
+    updateInviteToken: (projectId, inviteToken) =>
+        set((state) => {
+            const project = state.knownProjects[projectId]
+            if (!project) return state
+
+            const knownProjects = {
+                ...state.knownProjects,
+                [projectId]: {...project, inviteToken},
+            }
+
+            saveState({knownProjects, currentProjectId: state.currentProjectId})
+            return {knownProjects}
+        }),
+
+    renameProject: async (projectId, name) => {
+        const project = useProjectsStore.getState().knownProjects[projectId]
+        if (!project?.adminToken) throw new Error('Only admins can rename a project')
+
+        const trimmed = name.trim() || 'Untitled project'
+        const client = getSupabaseForProject(project.memberToken, project.adminToken)
+        const {error} = await client
+            .from('projects')
+            .update({name: trimmed})
+            .eq('id', projectId)
+
+        if (error) throw new Error(`Failed to rename project: ${error.message}`)
+
+        set((state) => {
+            const prev = state.knownProjects[projectId]
+            if (!prev) return state
+            const knownProjects = {
+                ...state.knownProjects,
+                [projectId]: {...prev, name: trimmed},
+            }
+            saveState({knownProjects, currentProjectId: state.currentProjectId})
+            return {knownProjects}
+        })
+    },
+
+    deleteProject: async (projectId) => {
+        const project = useProjectsStore.getState().knownProjects[projectId]
+        if (!project?.adminToken) throw new Error('Only admins can delete a project')
+
+        const client = getSupabaseForProject(project.memberToken, project.adminToken)
+        const {error} = await client
+            .from('projects')
+            .delete()
+            .eq('id', projectId)
+
+        if (error) throw new Error(`Failed to delete project: ${error.message}`)
+
+        // Drop it from this device (cascade removes its data server-side).
+        useProjectsStore.getState().leaveProject(projectId)
+    },
 }))
 
 export function useCurrentProject(): KnownProject | null {

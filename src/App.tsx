@@ -8,6 +8,7 @@ import KanbanPage from './pages/KanbanPage'
 import NotesPage from './pages/NotesPage'
 import ChatPage from './pages/ChatPage'
 import CalendarPage from './pages/CalendarPage'
+import AdminPage from './pages/AdminPage'
 import ProjectGuard from './components/common/ProjectGuard'
 
 function Layout() {
@@ -33,6 +34,7 @@ function App() {
                         <Route path="notes" element={<NotesPage/>}/>
                         <Route path="chat" element={<ChatPage/>}/>
                         <Route path="calendar" element={<CalendarPage/>}/>
+                        <Route path="admin" element={<AdminPage/>}/>
                     </Route>
                 </Route>
             </Routes>

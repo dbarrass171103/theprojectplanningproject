@@ -1,5 +1,6 @@
-﻿// Share modal for the current project. Shows member and (if available)
-// admin invite links with copy buttons.
+// Share modal for the current project. Shows the member invite link and, for
+// admins, the admin link. Member management (revoke, rotate, rename, delete)
+// lives on the dedicated Admin page.
 
 import {useEffect, useRef, useState} from 'react'
 import type {KnownProject} from '../../store/projectsStore'
@@ -9,21 +10,22 @@ interface ShareProjectModalProps {
     onClose: () => void
 }
 
-function buildInviteUrl(projectId: string, memberToken: string): string {
-    return `${window.location.origin}/p/${projectId}#tok=${memberToken}`
+function buildInviteUrl(projectId: string, inviteToken: string): string {
+    return `${window.location.origin}/p/${projectId}#tok=${inviteToken}`
 }
 
-function buildAdminUrl(projectId: string, memberToken: string, adminToken: string): string {
-    return `${window.location.origin}/p/${projectId}#tok=${memberToken}&admin=${adminToken}`
+function buildAdminUrl(projectId: string, inviteToken: string, adminToken: string): string {
+    return `${window.location.origin}/p/${projectId}#tok=${inviteToken}&admin=${adminToken}`
 }
 
 export default function ShareProjectModal({project, onClose}: ShareProjectModalProps) {
     const [copiedLink, setCopiedLink] = useState<'invite' | 'admin' | null>(null)
     const dialogRef = useRef<HTMLDivElement | null>(null)
 
-    const inviteUrl = buildInviteUrl(project.id, project.memberToken)
-    const adminUrl = project.adminToken
-        ? buildAdminUrl(project.id, project.memberToken, project.adminToken)
+    const inviteToken = project.inviteToken
+    const inviteUrl = inviteToken ? buildInviteUrl(project.id, inviteToken) : null
+    const adminUrl = inviteToken && project.adminToken
+        ? buildAdminUrl(project.id, inviteToken, project.adminToken)
         : null
 
     // Close on Escape or outside-click.
@@ -78,28 +80,34 @@ export default function ShareProjectModal({project, onClose}: ShareProjectModalP
                     </button>
                 </div>
 
-                <div className="mb-5">
-                    <h3 className="text-sm font-medium text-gray-700 mb-1">Invite link</h3>
-                    <p className="text-xs text-gray-500 mb-2">
-                        Anyone with this link can edit the project.
-                    </p>
+                {inviteUrl ? (
+                    <div className="mb-5">
+                        <h3 className="text-sm font-medium text-gray-700 mb-1">Invite link</h3>
+                        <p className="text-xs text-gray-500 mb-2">
+                            Anyone with this link can edit the project.
+                        </p>
 
-                    <div className="flex gap-2">
-                        <input
-                            readOnly
-                            value={inviteUrl}
-                            onFocus={e => e.currentTarget.select()}
-                            className="flex-1 text-xs font-mono rounded-lg border border-gray-300 px-3 py-2 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                        />
+                        <div className="flex gap-2">
+                            <input
+                                readOnly
+                                value={inviteUrl}
+                                onFocus={e => e.currentTarget.select()}
+                                className="flex-1 text-xs font-mono rounded-lg border border-gray-300 px-3 py-2 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            />
 
-                        <button
-                            onClick={() => copyToClipboard(inviteUrl, 'invite')}
-                            className="bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg px-3 py-2 transition-colors shrink-0"
-                        >
-                            {copiedLink === 'invite' ? 'Copied' : 'Copy'}
-                        </button>
+                            <button
+                                onClick={() => copyToClipboard(inviteUrl, 'invite')}
+                                className="bg-blue-500 hover:bg-blue-600 text-white text-sm rounded-lg px-3 py-2 transition-colors shrink-0"
+                            >
+                                {copiedLink === 'invite' ? 'Copied' : 'Copy'}
+                            </button>
+                        </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="mb-5 text-sm text-gray-500 bg-gray-50 rounded-lg px-3 py-2">
+                        Only an admin can invite new members to this project.
+                    </div>
+                )}
 
                 {adminUrl && (
                     <div className="border-t border-gray-100 pt-4">

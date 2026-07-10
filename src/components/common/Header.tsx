@@ -20,6 +20,8 @@ const PROJECT_NAV_ITEMS: NavItem[] = [
     {to: 'calendar', label: 'Calendar'},
 ]
 
+const ADMIN_NAV_ITEM: NavItem = {to: 'admin', label: 'Admin'}
+
 export default function Header() {
     const project = useCurrentProject()
     const navigate = useNavigate()
@@ -48,7 +50,10 @@ export default function Header() {
                         </span>
 
                         <nav className="flex items-center gap-1 overflow-x-auto flex-1">
-                            {PROJECT_NAV_ITEMS.map(item => {
+                            {(project.adminToken
+                                ? [...PROJECT_NAV_ITEMS, ADMIN_NAV_ITEM]
+                                : PROJECT_NAV_ITEMS
+                            ).map(item => {
                                 const path = item.to
                                     ? `/p/${project.id}/${item.to}`
                                     : `/p/${project.id}`
@@ -82,12 +87,11 @@ export default function Header() {
 
                         <SyncIndicator/>
 
-                        <button
-                            onClick={() => setShowShare(true)}
-                            className="text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-1.5 transition-colors shrink-0"
-                        >
-                            Share
-                        </button>
+                        {project.adminToken && (
+                            <button onClick={() => setShowShare(true)}
+                                    className="text-sm bg-blue-500 hover:bg-blue-600 text-white rounded-lg px-3 py-1.5 transition-colors shrink-0"
+                            > Share </button>
+                        )}
                     </>
                 ) : (
                     <span className="text-sm text-gray-400">
